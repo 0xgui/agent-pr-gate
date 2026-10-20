@@ -211,6 +211,13 @@ describe('solo maintainer: requirements that no one but the author can meet', ()
     expect(json(input).missing[0].cause).toBe('no-codeowners-file');
   });
 
+  it('marks files owned only by the author with the same cause', () => {
+    const input = mk('tiers:\n  high: [".github/workflows/**"]\nrouting:\n  approvals: { high: 0 }\n', {
+      codeowners: { ...noOwners, required: true, satisfied: false, owners: { users: ['solo'], teams: [] }, coverage: [{ file: '.github/workflows/ci.yml', owners: ['@solo'], status: 'author-only' }] },
+    });
+    expect(decide(input).problems.find((x) => x.id === 'codeowners')!.cause).toBe('no-other-reviewer');
+  });
+
   it('writes "1 approving review" in the tier line', () => {
     const input = mk('tiers:\n  high: [".github/workflows/**"]\nrouting:\n  approvals: { high: 1 }\n  high_requires_codeowners: false\n');
     expect(renderComment(input, decide(input), [])).toMatch(/needs 1 approving review\)/);

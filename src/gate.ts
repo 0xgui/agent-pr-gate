@@ -186,7 +186,7 @@ export function decide(input: GateInput): GateResult {
     const noFile = codeowners.missingFile === true;
     problems.push({
       id: 'codeowners',
-      ...(noFile ? { cause: 'no-codeowners-file' as const } : {}),
+      ...(noFile ? { cause: 'no-codeowners-file' as const } : open.length > 0 && open.every((c) => c.status === 'author-only') ? { cause: 'no-other-reviewer' as const } : {}),
       what: noFile ? 'High tier needs a code owner approval, but there is no CODEOWNERS file' : 'High tier needs a code owner approval for each high-risk file',
       where: noFile ? 'No .github/CODEOWNERS, CODEOWNERS or docs/CODEOWNERS on the base branch' : detail.length ? detail.join('; ') + (open.length > 10 ? `; and ${open.length - 10} more` : '') : who.length ? `CODEOWNERS: ${who.join(', ')}` : 'CODEOWNERS',
       fix: noFile

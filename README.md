@@ -153,7 +153,7 @@ The comment ends with a collapsed "Machine-readable result" block that holds JSO
 - `checks`: the checks that failed or are still running, for `ci:failing` and `ci:pending`
 - `files`: the high-tier files that still need a code owner, for `codeowners`
 - `reviewers`: who can approve, for `approvals` and `codeowners`. The author is never listed. An empty list means that the config and CODEOWNERS name nobody else
-- `cause`: why the requirement can't be met as configured. `no-other-reviewer` means only the author is listed in `maintainers` (and CODEOWNERS). `no-codeowners-file` means `high_requires_codeowners` is `true` but there is no CODEOWNERS file. See [One-person repositories](#one-person-repositories)
+- `cause`: why the requirement can't be met as configured. `no-other-reviewer` means only the author is listed in `maintainers` (and CODEOWNERS), or every open high-tier file is owned only by the author. `no-codeowners-file` means `high_requires_codeowners` is `true` but there is no CODEOWNERS file. See [One-person repositories](#one-person-repositories)
 
 `missing[].id` is one of these codes. Each code is `kind` or `kind:detail`:
 
