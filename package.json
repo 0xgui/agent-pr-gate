@@ -1,6 +1,6 @@
 {
   "name": "agent-pr-gate",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "GitHub Action that gates agent-written PRs before human review: risk tiers, required evidence, reviewer routing.",
   "main": "dist/index.js",
