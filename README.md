@@ -43,7 +43,7 @@ You need a repository with a CI workflow and permission to edit branch protectio
 	  statuses: write       # the agent-pr-gate commit status
 
 	jobs:
-	  agent-pr-gate:
+	  gate:
 	    runs-on: ubuntu-latest
 	    steps:
 	      - uses: 0xgui/agent-pr-gate@faead789a6d84fb588a22100cfc294e2a9ca779e # v1.0.0
@@ -54,15 +54,17 @@ You need a repository with a CI workflow and permission to edit branch protectio
 	Pin the action to a full 40-character commit SHA and keep the version in a comment. The example pins `v1.0.0`. The tag `v1` points to the latest `v1.x.y` release. `@v1` is easier to keep current, but whoever can move that tag controls your gate, so a SHA is safer. Don't use a branch name such as `@main`.
 
 2. Merge the workflow into the default branch. Then open a PR. The gate posts its comment and sets the `agent-pr-gate` commit status.
-3. In branch protection, make `agent-pr-gate` a required check. Keep required reviews and code owner review turned on. The gate reports and routes. Branch protection is what enforces reviews.
+3. In branch protection, make the `agent-pr-gate` commit status a required check. Keep required reviews and code owner review turned on. The gate reports and routes. Branch protection is what enforces reviews.
 
-Two checks named `agent-pr-gate` show up on each PR: the commit status that the gate writes, and the check run of the workflow job (named after the job ID). They agree while `fail-on-block` is `true`, the default, because the job fails when the PR is blocked. Require `agent-pr-gate` and keep `fail-on-block: true`. If you set `fail-on-block: 'false'`, the job passes while the status fails, so don't make the gate required in that mode.
+Require only the `agent-pr-gate` commit status. Don't require the `gate` job check. The job check is named after the job ID, and it can be green when the PR isn't: a stale run (the PR changed during the check) writes no status and passes. With `fail-on-block: 'false'`, a blocked run passes too. Keep the job ID different from the status context, so a required `agent-pr-gate` can only match the status.
+
+Use the same job ID, `gate`, in every workflow that runs the gate, including the scheduled re-check. The gate skips its own check run by job ID, so a re-check job with another ID would count the event job's check as CI. If you use another job ID, add it to `ignore-checks`.
 
 `ci-wait-seconds` makes the first run wait for your CI. With `0`, the first status is often `ci:pending`, and the gate runs again through `workflow_run` when CI finishes. That re-run also works only from the default branch. A higher value holds a runner while the gate waits, so set it to about your CI's usual duration.
 
 ### Try it on a branch
 
-Because `pull_request_target` uses the default branch's workflow, the gate can't run on PRs to a test branch. To try it before merging, add a temporary copy of the workflow that runs on `pull_request` instead of `pull_request_target`, on the branch your test PRs target, and branch the test PRs from it. `pull_request` runs the workflow file from the PR itself, and fork PRs get a read-only token, so delete the copy before you merge.
+The gate runs on PRs to any branch, but always from the workflow on the default branch. So a gate workflow that exists only on a test branch never runs. To try it before merging, add a temporary copy of the workflow that runs on `pull_request` instead of `pull_request_target`, on the branch your test PRs target, and branch the test PRs from it. `pull_request` runs the workflow file from the PR itself, and fork PRs get a read-only token, so delete the copy before you merge.
 
 The default `github-token` is enough. Without a config file, every file gets the `medium` tier.
 
