@@ -213,7 +213,7 @@ describe('solo maintainer: requirements that no one but the author can meet', ()
 
   it('marks files owned only by the author with the same cause', () => {
     const input = mk('tiers:\n  high: [".github/workflows/**"]\nrouting:\n  approvals: { high: 0 }\n', {
-      codeowners: { ...noOwners, required: true, satisfied: false, owners: { users: ['solo'], teams: [] }, coverage: [{ file: '.github/workflows/ci.yml', owners: ['@solo'], status: 'author-only' }] },
+      codeowners: { ...noOwners, required: true, satisfied: false, owners: { users: ['solo'], teams: [] }, coverage: [{ file: '.github/workflows/ci.yml', owners: ['@solo'], status: 'author-only', approvedBy: [] }] },
     });
     expect(decide(input).problems.find((x) => x.id === 'codeowners')!.cause).toBe('no-other-reviewer');
   });

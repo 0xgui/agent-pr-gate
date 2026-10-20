@@ -34397,7 +34397,7 @@ function decide(input) {
     const noFile = codeowners.missingFile === true;
     problems.push({
       id: "codeowners",
-      ...noFile ? { cause: "no-codeowners-file" } : {},
+      ...noFile ? { cause: "no-codeowners-file" } : open2.length > 0 && open2.every((c) => c.status === "author-only") ? { cause: "no-other-reviewer" } : {},
       what: noFile ? "High tier needs a code owner approval, but there is no CODEOWNERS file" : "High tier needs a code owner approval for each high-risk file",
       where: noFile ? "No .github/CODEOWNERS, CODEOWNERS or docs/CODEOWNERS on the base branch" : detail.length ? detail.join("; ") + (open2.length > 10 ? `; and ${open2.length - 10} more` : "") : who.length ? `CODEOWNERS: ${who.join(", ")}` : "CODEOWNERS",
       fix: noFile ? `Add a CODEOWNERS file on the base branch that names an owner other than the author, or set routing.high_requires_codeowners: false in ${input.cfg.path}.` : notes.length ? notes.join(" ") : `Get an approving review from an owner of each listed file.`,
