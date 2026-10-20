@@ -25,6 +25,8 @@ export interface CodeownersState {
   coverage?: FileCoverage[];
   requested: string[];
   note?: string;
+  /** No CODEOWNERS file on the base commit. */
+  missingFile?: true;
 }
 
 export interface GateInput {
@@ -88,6 +90,8 @@ export interface Problem {
   files?: string[];
   /** Logins and teams who can resolve it: maintainers and code owners, never the author. */
   reviewers?: string[];
+  /** Why the requirement cannot be met as configured: no-other-reviewer or no-codeowners-file. */
+  cause?: 'no-other-reviewer' | 'no-codeowners-file';
 }
 
 export interface GateResult {
@@ -143,16 +147,27 @@ export function decide(input: GateInput): GateResult {
   const waived: string[] = [];
   if (override && approvers.length < need) waived.push(`${need} approving review(s)`);
   if (approvers.length < need && !override) {
+    const reviewers = eligibleReviewers(input);
+    // The cheapest correct signal: the config names reviewers (maintainers, CODEOWNERS), and the
+    // author is the only one. Others with write access could still exist, so say so, not more.
+    const onlyAuthor = reviewers.length === 0 && input.cfg.maintainers.length > 0;
+    const listHint = onlyAuthor
+      ? ` Only the author is listed in maintainers${input.codeowners.required ? ' and CODEOWNERS' : ''}, and the author's approval never counts. If nobody else has write access, this can never pass. To fix it, add another reviewer (maintainers, CODEOWNERS and repo access), set routing.approvals.${tier.tier}: 0 in ${input.cfg.path} (evidence and CI still apply), or merge with an admin bypass.`
+      : reviewers.length === 0
+        ? ' No reviewer is listed in maintainers or CODEOWNERS, so anyone with write access other than the author can approve.'
+        : '';
     problems.push({
       id: 'approvals',
-      what: `Needs ${need} approving human review(s), has ${approvers.length}`,
+      what: `Needs ${need} approving human review(s), has ${approvers.length}` + (onlyAuthor ? ' (only the author is listed as a reviewer)' : ''),
       where: 'PR reviews',
       fix:
         `${need - approvers.length} more approval(s) on the current head commit from people with repo access, other than the author. Bot approvals do not count.` +
+        listHint +
         (input.ignoredApprovals?.stale.length ? ` Stale (re-approve the latest commit): ${input.ignoredApprovals.stale.map((u) => '@' + u).join(', ')}.` : '') +
         (input.ignoredApprovals?.untrusted.length ? ` Not counted (no repo access): ${input.ignoredApprovals.untrusted.map((u) => '@' + u).join(', ')}.` : ''),
       who: 'reviewer',
-      reviewers: eligibleReviewers(input),
+      reviewers,
+      ...(onlyAuthor ? { cause: 'no-other-reviewer' as const } : {}),
     });
   }
   if (codeowners.required && !codeowners.satisfied) {
@@ -168,11 +183,15 @@ export function decide(input: GateInput): GateResult {
             : `${c.file} needs one of ${c.owners.join(' ')}`,
       );
     const notes = [codeowners.note, open.some((c) => c.status === 'author-only') ? 'The author cannot approve their own PR; add another owner or have an admin bypass.' : undefined].filter(Boolean);
+    const noFile = codeowners.missingFile === true;
     problems.push({
       id: 'codeowners',
-      what: 'High tier needs a code owner approval for each high-risk file',
-      where: detail.length ? detail.join('; ') + (open.length > 10 ? `; and ${open.length - 10} more` : '') : who.length ? `CODEOWNERS: ${who.join(', ')}` : 'CODEOWNERS',
-      fix: notes.length ? notes.join(' ') : `Get an approving review from an owner of each listed file.`,
+      ...(noFile ? { cause: 'no-codeowners-file' as const } : open.length > 0 && open.every((c) => c.status === 'author-only') ? { cause: 'no-other-reviewer' as const } : {}),
+      what: noFile ? 'High tier needs a code owner approval, but there is no CODEOWNERS file' : 'High tier needs a code owner approval for each high-risk file',
+      where: noFile ? 'No .github/CODEOWNERS, CODEOWNERS or docs/CODEOWNERS on the base branch' : detail.length ? detail.join('; ') + (open.length > 10 ? `; and ${open.length - 10} more` : '') : who.length ? `CODEOWNERS: ${who.join(', ')}` : 'CODEOWNERS',
+      fix: noFile
+        ? `Add a CODEOWNERS file on the base branch that names an owner other than the author, or set routing.high_requires_codeowners: false in ${input.cfg.path}.`
+        : notes.length ? notes.join(' ') : `Get an approving review from an owner of each listed file.`,
       who: 'reviewer',
       files: open.map((c) => c.file),
       reviewers: [...codeowners.owners.users, ...codeowners.owners.teams].filter((h) => h.toLowerCase() !== input.author.toLowerCase()),
@@ -218,7 +237,7 @@ export function renderComment(input: GateInput, result: GateResult, humans: stri
       ? 'OK to merge once CI is green'
       : tier.tier === 'medium'
         ? `needs ${result.requiredApprovals} approving review(s)`
-        : `needs ${result.requiredApprovals} approving reviews${input.codeowners.required ? ' plus a CODEOWNERS approval' : ''}`;
+        : `needs ${result.requiredApprovals} approving review${result.requiredApprovals === 1 ? '' : 's'}${input.codeowners.required ? ' plus a CODEOWNERS approval' : ''}`;
   lines.push(`**Risk tier:** \`${tier.tier}\` (${reqText})`);
   if (tier.forced) lines.push('', `**Why \`${tier.tier}\`:** ${tier.forced}`);
   if (tier.triggers.length) {
@@ -285,6 +304,7 @@ export function renderComment(input: GateInput, result: GateResult, humans: stri
       ...(p.checks !== undefined ? { checks: p.checks } : {}),
       ...(p.files !== undefined ? { files: p.files } : {}),
       ...(p.reviewers !== undefined ? { reviewers: p.reviewers } : {}),
+      ...(p.cause !== undefined ? { cause: p.cause } : {}),
     })),
     approvals: { have: input.approvers.length, need: result.requiredApprovals },
     codeowners_required: input.codeowners.required,

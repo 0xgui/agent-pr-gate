@@ -20,17 +20,19 @@ The verdict is the step result, a commit status named `agent-pr-gate`, the step 
 
 You need a repository with a CI workflow and permission to edit branch protection.
 
+> **Important:** Under GitHub's current rules, `pull_request_target` and `workflow_run` always run the workflow file from the **default branch**. That's true whatever the PR's base branch is. So the gate does nothing until its workflow is on the default branch, and the PR that adds it isn't gated. Merge the setup PR first, then open a PR to see the gate. The gate still reads `.review-gate.yml` and CODEOWNERS from each PR's base commit.
+
 1. Create `.github/workflows/agent-pr-gate.yml` in the repository you want to gate:
 
 	```yaml
 	name: agent-pr-gate
 	on:
-	  # Runs from the base branch with a write token, also for fork PRs.
+	  # Runs the workflow from the default branch with a write token, also for fork PRs.
 	  # Never check out or run PR code in this workflow.
 	  pull_request_target:
 	    types: [opened, edited, synchronize, reopened, ready_for_review, labeled, unlabeled]
 	  workflow_run:
-	    workflows: [CI]        # the name of your CI workflow
+	    workflows: [CI]        # the name of your CI workflow; re-runs the gate when CI finishes
 	    types: [completed]
 
 	permissions:
@@ -41,16 +43,28 @@ You need a repository with a CI workflow and permission to edit branch protectio
 	  statuses: write       # the agent-pr-gate commit status
 
 	jobs:
-	  agent-pr-gate:
+	  agent-pr-gate-job:
 	    runs-on: ubuntu-latest
 	    steps:
-	      - uses: 0xgui/agent-pr-gate@<sha> # pin to a full commit SHA
+	      - uses: 0xgui/agent-pr-gate@faead789a6d84fb588a22100cfc294e2a9ca779e # v1.0.0
+	        with:
+	          ci-wait-seconds: '300'   # about as long as your CI usually takes
 	```
 
-	Replace `<sha>` with a full 40-character commit SHA from this repository. There are no tagged releases yet. Don't use a branch name such as `@main`, because anyone who can push to that branch then controls your gate.
+	Pin the action to a full 40-character commit SHA and keep the version in a comment. The example pins `v1.0.0`. The tag `v1` points to the latest `v1.x.y` release. `@v1` is easier to keep current, but whoever can move that tag controls your gate, so a SHA is safer. Don't use a branch name such as `@main`.
 
-2. Open a PR. The gate posts its comment and sets the `agent-pr-gate` commit status.
-3. In branch protection, make the `agent-pr-gate` status a required check. Keep required reviews and code owner review turned on. The gate reports and routes. Branch protection is what enforces reviews.
+2. Merge the workflow into the default branch. Then open a PR. The gate posts its comment and sets the `agent-pr-gate` commit status.
+3. In branch protection, make the `agent-pr-gate` commit status a required check. Keep required reviews and code owner review turned on. The gate reports and routes. Branch protection is what enforces reviews.
+
+Require only the `agent-pr-gate` commit status. Don't require the `agent-pr-gate-job` job check. The job check is named after the job ID, and it can be green when the PR isn't: a stale run (the PR changed during the check) writes no status and passes. With `fail-on-block: 'false'`, a blocked run passes too. Keep the job ID different from the status context, so a required `agent-pr-gate` can only match the status.
+
+Use the same job ID, `agent-pr-gate-job`, in every workflow that runs the gate, including the scheduled re-check. The gate skips its own check run by job ID, so a re-check job with another ID would count the event job's check as CI. If you use another job ID, add it to `ignore-checks`. The CI check ignores every check run named like the job ID, from any workflow, so don't give any other job that name.
+
+`ci-wait-seconds` makes the first run wait for your CI. With `0`, the first status is often `ci:pending`, and the gate runs again through `workflow_run` when CI finishes. That re-run also works only from the default branch. A higher value holds a runner while the gate waits, so set it to about your CI's usual duration.
+
+### Try it on a branch
+
+The gate runs on PRs to any branch, but always from the workflow on the default branch. So a gate workflow that exists only on a test branch never runs. To try it before merging, add a temporary copy of the workflow that runs on `pull_request` instead of `pull_request_target`, on the branch your test PRs target, and branch the test PRs from it. `pull_request` runs the workflow file from the PR itself, and fork PRs get a read-only token, so delete the copy before you merge.
 
 The default `github-token` is enough. Without a config file, every file gets the `medium` tier.
 
@@ -140,7 +154,8 @@ The comment ends with a collapsed "Machine-readable result" block that holds JSO
 - `section`: the required section, for section codes
 - `checks`: the checks that failed or are still running, for `ci:failing` and `ci:pending`
 - `files`: the high-tier files that still need a code owner, for `codeowners`
-- `reviewers`: who can approve, for `approvals` and `codeowners`. The author is never listed. An empty list means anyone with repository access
+- `reviewers`: who can approve, for `approvals` and `codeowners`. The author is never listed. An empty list means that the config and CODEOWNERS name nobody else
+- `cause`: why the requirement can't be met as configured. `no-other-reviewer` means only the author is listed in `maintainers` (and CODEOWNERS), or every open high-tier file is owned only by the author. `no-codeowners-file` means `high_requires_codeowners` is `true` but there is no CODEOWNERS file. See [One-person repositories](#one-person-repositories)
 
 `missing[].id` is one of these codes. Each code is `kind` or `kind:detail`:
 
@@ -181,6 +196,18 @@ Use these settings when the defaults are too strict for your repository:
 
 By default, the gate checks every PR, including PRs from people. A PR without the three sections is blocked until someone adds them. Add the sections to your PR template, relax the rules above, or limit the gate to agent PRs.
 
+### One-person repositories
+
+The gate never waives the high tier, and the author's own approval never counts. So on a repository with one maintainer, a high-tier PR needs a review that nobody can give. When `maintainers` lists only the author, the `approvals` item says so and has `"cause": "no-other-reviewer"`. When `high_requires_codeowners` is `true` and there is no CODEOWNERS file, the `codeowners` item has `"cause": "no-codeowners-file"`. Choose one:
+
+- Add another reviewer: a collaborator with write access, listed in `maintainers` and CODEOWNERS.
+- Set `routing.approvals.high: 0` and `routing.high_requires_codeowners: false`. Evidence and green CI still apply to high-tier PRs.
+- Keep the block and merge high-tier PRs with an admin bypass.
+
+For low-tier and medium-tier PRs, use the [owner override](#owner-override).
+
+The gate can't see who else has write access without an extra API call that the default token may not be allowed to make. So it judges by what the config names: `maintainers` and CODEOWNERS. With an empty `maintainers` list, it doesn't guess. It says that anyone with write access other than the author can approve.
+
 ### Limit the gate to agent PRs
 
 Set `scope` to check only some PRs:
@@ -217,7 +244,7 @@ The example workflow runs on `labeled` and `unlabeled`, so a label change re-run
 | `github-token` | `github.token` | Token for API calls |
 | `config-path` | `.review-gate.yml` | Config location |
 | `config-ref` | `base` | Read the config from the base commit. `head` lets a PR change its own rules, so use it only on trusted repositories. CODEOWNERS always comes from the base commit |
-| `ci-wait-seconds` | `0` | How long to wait for other checks to finish before judging CI |
+| `ci-wait-seconds` | `0` | How long to wait for other checks to finish before judging CI. Set it to about your CI's usual duration. See [Set it up](#set-it-up) |
 | `ignore-checks` | | Comma-separated extra check names to ignore |
 | `status-context` | `agent-pr-gate` | Commit status to write. Empty turns the status off |
 | `comment-author` | `github-actions[bot]` | Login whose marker comment the gate edits, when the token can't report its own identity. Set it when you use a GitHub App token |
@@ -355,7 +382,7 @@ Time to first human review runs from PR creation to the first review by someone 
 
 ## Security notes
 
-- Use `pull_request_target`, so fork PRs get a token that can comment and add labels. That event runs the workflow from the base branch with a write token. Never check out or run PR code in the gate workflow. The action reads the PR only through the API.
+- Use `pull_request_target`, so fork PRs get a token that can comment and add labels. That event runs the workflow from the default branch with a write token. Never check out or run PR code in the gate workflow. The action reads the PR only through the API.
 - The gate reads config and CODEOWNERS from the base commit, so a PR can't lower its own tier or remove its own owners.
 - The PR description is untrusted text. The action only parses it. Quote the action's outputs if you use them in `run:` steps.
 - Grant only the permissions in the example: `contents: read`, `pull-requests: write`, `issues: write`, `checks: read`, and `statuses: write`.

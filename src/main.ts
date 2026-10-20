@@ -207,7 +207,7 @@ async function codeownersState(
     if (text !== null) break;
   }
   if (text === null) {
-    return { ...empty, required: true, satisfied: false, note: `No CODEOWNERS file on the base branch. Add one, or set routing.high_requires_codeowners: false in ${cfg.path}.` };
+    return { ...empty, required: true, satisfied: false, missingFile: true, note: `No CODEOWNERS file on the base branch. Add one, or set routing.high_requires_codeowners: false in ${cfg.path}.` };
   }
   const rules = parseCodeowners(text);
   const owners = splitOwners([...new Set(highFiles.flatMap((f) => ownersFor(f, rules)))]);
