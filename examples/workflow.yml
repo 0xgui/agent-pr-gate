@@ -1,7 +1,8 @@
 # .github/workflows/agent-pr-gate.yml in the repo you want to gate.
 name: agent-pr-gate
 on:
-  # Runs the workflow from the BASE branch with a write token, also for fork PRs.
+  # Runs the workflow from the DEFAULT branch with a write token, also for fork PRs. GitHub
+  # always uses the default branch's copy, so the gate starts once this file is merged there.
   # Never check out or run PR code in this workflow.
   pull_request_target:
     types: [opened, edited, synchronize, reopened, ready_for_review, labeled, unlabeled]
@@ -32,11 +33,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: gate
-        # Replace <sha> with a full 40-character commit SHA from 0xgui/agent-pr-gate (and keep a
-        # version comment). Never use a branch name like @main: whoever can push to it controls your gate.
-        uses: 0xgui/agent-pr-gate@<sha> # vX.Y.Z
+        # Pin a full 40-character commit SHA and keep the version comment. Never use a branch
+        # name like @main: whoever can push to it controls your gate.
+        uses: 0xgui/agent-pr-gate@faead789a6d84fb588a22100cfc294e2a9ca779e # v1.0.0
         with:
-          ci-wait-seconds: '0'
+          # Wait about as long as CI takes, so the first status isn't "CI pending".
+          # workflow_run re-runs the gate when CI finishes either way.
+          ci-wait-seconds: '300'
       - if: always() && steps.gate.outputs.metrics-path != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

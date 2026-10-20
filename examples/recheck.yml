@@ -24,7 +24,7 @@ jobs:
   recheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: 0xgui/agent-pr-gate@<sha> # vX.Y.Z, pin to a full commit SHA
+      - uses: 0xgui/agent-pr-gate@faead789a6d84fb588a22100cfc294e2a9ca779e # v1.0.0
         with:
           pr-number: open      # sweep open PRs (unchanged ones are skipped)
           max-prs: 20          # per run, oldest-checked first

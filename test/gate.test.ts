@@ -172,3 +172,47 @@ describe('scope note', () => {
     expect(JSON.parse(/```json\n([\s\S]*?)\n```/.exec(body)![1]!).scope_note).toMatch(/gate-control/);
   });
 });
+
+describe('solo maintainer: requirements that no one but the author can meet', () => {
+  const evidence = checkEvidence('## Testing\nok\n## Risk\nok\n## How to revert\nok', DEFAULT_SECTIONS);
+  const noOwners = { required: false, owners: { users: [], teams: [] }, approvedBy: [], satisfied: true, requested: [] };
+  const mk = (yml: string, over: Partial<GateInput> = {}): GateInput => {
+    const cfg = parseConfig(yml);
+    return { cfg, author: 'solo', tier: classify(['.github/workflows/ci.yml'], cfg), evidence, ci: null, approvers: [], codeowners: noOwners, rounds: { rounds: 0, openedBy: [] }, ...over };
+  };
+  const json = (input: GateInput) => JSON.parse(/```json\n([\s\S]*?)\n```/.exec(renderComment(input, decide(input), []))![1]!);
+
+  it('says the approvals can never come when only the author is listed, with fix steps', () => {
+    const input = mk('tiers:\n  high: [".github/workflows/**"]\nrouting:\n  approvals: { high: 1 }\n  high_requires_codeowners: false\nmaintainers: ["@solo"]\n');
+    const p = decide(input).problems.find((x) => x.id === 'approvals')!;
+    expect(p.cause).toBe('no-other-reviewer');
+    expect(p.fix).toMatch(/routing\.approvals\.high: 0/);
+    expect(p.fix).toMatch(/admin bypass/);
+    expect(p.fix).toMatch(/CODEOWNERS|maintainers/);
+    expect(json(input).missing[0]).toMatchObject({ id: 'approvals', cause: 'no-other-reviewer', reviewers: [] });
+    expect(renderComment(input, decide(input), [])).toMatch(/only the author/i);
+  });
+
+  it('keeps the plain message when nobody is listed, and says what an empty reviewers list means', () => {
+    const input = mk('tiers:\n  high: [".github/workflows/**"]\nrouting:\n  high_requires_codeowners: false\n');
+    const p = decide(input).problems.find((x) => x.id === 'approvals')!;
+    expect(p.cause).toBeUndefined();
+    expect(p.fix).toMatch(/No reviewer is listed/);
+  });
+
+  it('names a missing CODEOWNERS file as the cause', () => {
+    const input = mk('tiers:\n  high: [".github/workflows/**"]\nrouting:\n  approvals: { high: 0 }\n', {
+      codeowners: { ...noOwners, required: true, satisfied: false, missingFile: true },
+    });
+    const p = decide(input).problems.find((x) => x.id === 'codeowners')!;
+    expect(p.cause).toBe('no-codeowners-file');
+    expect(p.what).toMatch(/no CODEOWNERS file/);
+    expect(p.fix).toMatch(/high_requires_codeowners: false/);
+    expect(json(input).missing[0].cause).toBe('no-codeowners-file');
+  });
+
+  it('writes "1 approving review" in the tier line', () => {
+    const input = mk('tiers:\n  high: [".github/workflows/**"]\nrouting:\n  approvals: { high: 1 }\n  high_requires_codeowners: false\n');
+    expect(renderComment(input, decide(input), [])).toMatch(/needs 1 approving review\)/);
+  });
+});
