@@ -43,7 +43,7 @@ You need a repository with a CI workflow and permission to edit branch protectio
 	  statuses: write       # the agent-pr-gate commit status
 
 	jobs:
-	  gate:
+	  agent-pr-gate-job:
 	    runs-on: ubuntu-latest
 	    steps:
 	      - uses: 0xgui/agent-pr-gate@faead789a6d84fb588a22100cfc294e2a9ca779e # v1.0.0
@@ -56,9 +56,9 @@ You need a repository with a CI workflow and permission to edit branch protectio
 2. Merge the workflow into the default branch. Then open a PR. The gate posts its comment and sets the `agent-pr-gate` commit status.
 3. In branch protection, make the `agent-pr-gate` commit status a required check. Keep required reviews and code owner review turned on. The gate reports and routes. Branch protection is what enforces reviews.
 
-Require only the `agent-pr-gate` commit status. Don't require the `gate` job check. The job check is named after the job ID, and it can be green when the PR isn't: a stale run (the PR changed during the check) writes no status and passes. With `fail-on-block: 'false'`, a blocked run passes too. Keep the job ID different from the status context, so a required `agent-pr-gate` can only match the status.
+Require only the `agent-pr-gate` commit status. Don't require the `agent-pr-gate-job` job check. The job check is named after the job ID, and it can be green when the PR isn't: a stale run (the PR changed during the check) writes no status and passes. With `fail-on-block: 'false'`, a blocked run passes too. Keep the job ID different from the status context, so a required `agent-pr-gate` can only match the status.
 
-Use the same job ID, `gate`, in every workflow that runs the gate, including the scheduled re-check. The gate skips its own check run by job ID, so a re-check job with another ID would count the event job's check as CI. If you use another job ID, add it to `ignore-checks`.
+Use the same job ID, `agent-pr-gate-job`, in every workflow that runs the gate, including the scheduled re-check. The gate skips its own check run by job ID, so a re-check job with another ID would count the event job's check as CI. If you use another job ID, add it to `ignore-checks`. The CI check ignores every check run named like the job ID, from any workflow, so don't give any other job that name.
 
 `ci-wait-seconds` makes the first run wait for your CI. With `0`, the first status is often `ci:pending`, and the gate runs again through `workflow_run` when CI finishes. That re-run also works only from the default branch. A higher value holds a runner while the gate waits, so set it to about your CI's usual duration.
 

@@ -15,14 +15,14 @@ const jobsIn = (text: string): string[] => {
 };
 
 describe('gate workflows', () => {
-  it.each(['examples/workflow.yml', 'examples/recheck.yml', '.github/workflows/gate.yml'])('%s runs the gate in a job named "gate"', (file) => {
-    expect(gateJobs(file)).toEqual(['gate']);
+  it.each(['examples/workflow.yml', 'examples/recheck.yml', '.github/workflows/gate.yml'])('%s runs the gate in a job named "agent-pr-gate-job"', (file) => {
+    expect(gateJobs(file)).toEqual(['agent-pr-gate-job']);
   });
 
   it('the README setup example uses the same job ID', () => {
     const readme = readFileSync('README.md', 'utf8');
     const block = /```yaml\n([\s\S]*?pull_request_target[\s\S]*?)```/.exec(readme.replace(/^\t/gm, ''))![1]!;
-    expect(jobsIn(block)).toEqual(['gate']);
+    expect(jobsIn(block)).toEqual(['agent-pr-gate-job']);
   });
 });
 
