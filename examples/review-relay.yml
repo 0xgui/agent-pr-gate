@@ -1,0 +1,19 @@
+# .github/workflows/review-relay.yml: an unprivileged, best-effort relay for review events.
+# Best-effort: on fork PRs this workflow runs from the PR's merge commit, so a fork can remove or
+# change it. examples/recheck.yml is the backstop and branch protection is the enforcement.
+# pull_request_review runs with a read-only token on fork PRs, so it cannot label or comment.
+# This workflow does nothing itself; its completion triggers the gate through workflow_run
+# (see examples/workflow.yml), which runs from the default branch with a write token and finds
+# the PR from the head SHA. Never pass data from this run to the gate as trusted input.
+name: review-relay
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions: {}
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Review event recorded; agent-pr-gate re-runs via workflow_run."

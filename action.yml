@@ -1,0 +1,70 @@
+name: agent-pr-gate
+description: Gate agent-written PRs before human review. Sets a risk tier, checks required evidence, routes reviewers, caps review rounds.
+author: 0xgui
+branding:
+  icon: shield
+  color: orange
+inputs:
+  github-token:
+    description: Token used for API calls. Needs pull-requests/issues write, contents/checks read, statuses write.
+    default: ${{ github.token }}
+  config-path:
+    description: Path of the gate config in the repo.
+    default: .review-gate.yml
+  config-ref:
+    description: Read config from "base" (default, safe for pull_request_target) or "head".
+    default: base
+  ci-wait-seconds:
+    description: Poll this long for other checks to finish before judging CI. 0 judges immediately.
+    default: '0'
+  ignore-checks:
+    description: Comma-separated extra check names or status contexts to leave out of the CI verdict.
+    default: ''
+  status-context:
+    description: Commit status context the gate writes its verdict to. Empty disables it.
+    default: agent-pr-gate
+  comment-author:
+    description: Login whose marker comment the gate adopts and edits. Used when the token cannot report its own identity (the default GITHUB_TOKEN). Set it when you pass a GitHub App token.
+    default: github-actions[bot]
+  fail-on-block:
+    description: Fail the step when requirements are not met.
+    default: 'true'
+  pr-number:
+    description: PR to evaluate, a comma-separated list, or "open" for every open PR (scheduled re-checks). Defaults to the PR from the event payload.
+    default: ''
+  max-prs:
+    description: With pr-number "open", evaluate at most this many due PRs per run, oldest-evaluated first. PRs whose inputs and CI match the fingerprint in the gate comment are skipped until recheck-max-age-hours.
+    default: '20'
+  recheck-max-age-hours:
+    description: With pr-number "open", re-check a PR at least this often even if its inputs and CI did not change.
+    default: '6'
+  min-rate-limit:
+    description: With several PRs, stop the batch when fewer core API requests than this remain.
+    default: '200'
+  metrics-path:
+    description: Where to write the metrics JSON. Defaults to $RUNNER_TEMP/agent-pr-gate-metrics.json.
+    default: ''
+outputs:
+  result:
+    description: pass, blocked or out-of-scope
+  tier:
+    description: low, medium or high
+  required-approvals:
+    description: Approvals the tier requires
+  approvals:
+    description: Human approvals counted
+  rounds:
+    description: Review/fix rounds counted
+  round-cap-reached:
+    description: true when rounds >= cap
+  missing:
+    description: JSON list of problem ids
+  comment-id:
+    description: Id of the gate comment
+  metrics:
+    description: Metrics as JSON
+  metrics-path:
+    description: Path of the metrics JSON file
+runs:
+  using: node24
+  main: dist/index.js

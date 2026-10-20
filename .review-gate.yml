@@ -1,0 +1,49 @@
+# agent-pr-gate config for this repo. See README.md for every option.
+default_tier: medium
+
+# Highest matching tier across all changed files wins.
+tiers:
+  low:
+    - "docs/**"
+    - "*.md"
+    - "examples/**"
+  medium:
+    - "src/**"
+    - "test/**"
+  high:
+    - ".github/workflows/**"
+    - ".github/CODEOWNERS"
+    - ".review-gate.yml"
+    - "action.yml"
+    - "dist/**"
+
+evidence:
+  sections:
+    - Testing
+    - Risk
+    - name: How to revert
+      aliases: [Rollback, Revert plan]
+  require_green_ci: true
+
+routing:
+  approvals:
+    low: 0
+    medium: 1
+    high: 2
+  high_requires_codeowners: true
+  # Single-maintainer repository. Low and medium PRs opened under the owner's account, by the
+  # owner or by an agent, need no approving review. High tier and PRs that touch gate-control
+  # files are never waived. Evidence, green CI and the round cap still apply.
+  owner_override: true
+  owners: [0xgui]
+  owner_override_tiers: [low, medium]
+
+rounds:
+  cap: 2   # matches the 2-round review limit in REVIEW_POLICY.md
+  review_states: [CHANGES_REQUESTED]
+
+maintainers:
+  - 0xgui
+
+metrics:
+  revert_lookback_days: 30

@@ -1,0 +1,31 @@
+# .github/workflows/agent-pr-gate-recheck.yml: scheduled re-check from the default branch.
+# The review relay (review-relay.yml) runs from a fork PR's merge commit, so a fork can delete
+# it. This cron job always runs the gate from the default branch for every open PR, so reviews
+# and CI changes are picked up even without the relay. It is a backstop, not enforcement:
+# branch protection (required reviews, code owner review) is what actually blocks merges.
+name: agent-pr-gate-recheck
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  checks: read
+  statuses: write
+
+concurrency:
+  group: agent-pr-gate-recheck
+  cancel-in-progress: false
+
+jobs:
+  recheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: 0xgui/agent-pr-gate@<sha> # vX.Y.Z, pin to a full commit SHA
+        with:
+          pr-number: open      # sweep open PRs (unchanged ones are skipped)
+          max-prs: 20          # per run, oldest-checked first
+          fail-on-block: false # a blocked PR should not make the cron job red

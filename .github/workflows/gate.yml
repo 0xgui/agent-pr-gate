@@ -1,0 +1,42 @@
+# Dogfood: runs this repo's own action from the PR checkout (`uses: ./`).
+# That means a PR's own code judges itself: a PR can edit src/ or dist/ to always pass.
+# So this workflow is a smoke test, NOT a trustworthy required check. It is non-required and
+# must stay that way (see REVIEW_POLICY.md); the merge criterion is CI (ci.yml).
+# TODO(after merge): pin to a reviewed main SHA, e.g. `uses: 0xgui/agent-pr-gate@<main sha>`,
+# so the gate that judges a PR comes from main, not from the PR.
+# Same-repo PRs only. Fork PRs get a read-only token under `pull_request`, so the gate
+# cannot comment or label there. Consumers should use examples/workflow.yml instead.
+name: agent-pr-gate
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  checks: read
+  statuses: write
+
+concurrency:
+  group: agent-pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  agent-pr-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: gate
+        uses: ./
+        with:
+          ci-wait-seconds: '300'
+      - if: always() && steps.gate.outputs.metrics-path != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-pr-gate-metrics
+          path: ${{ steps.gate.outputs.metrics-path }}

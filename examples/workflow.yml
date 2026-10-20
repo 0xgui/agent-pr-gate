@@ -1,0 +1,44 @@
+# .github/workflows/agent-pr-gate.yml in the repo you want to gate.
+name: agent-pr-gate
+on:
+  # Runs the workflow from the BASE branch with a write token, also for fork PRs.
+  # Never check out or run PR code in this workflow.
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  # Re-evaluate when CI finishes, and after reviews. Reviews arrive through the unprivileged
+  # relay in examples/review-relay.yml: pull_request_review runs with a read-only token on fork
+  # PRs, so the privileged gate run happens here, from the default branch, via workflow_run.
+  workflow_run:
+    workflows: [CI, review-relay]
+    types: [completed]
+
+permissions:
+  contents: read        # read .review-gate.yml and CODEOWNERS from the base branch
+  pull-requests: write  # labels, review requests
+  issues: write         # the gate comment, creating labels
+  checks: read          # CI verdict
+  statuses: write       # the agent-pr-gate commit status
+
+# One gate run per PR at a time. workflow_run payloads only carry the PR number for same-repo
+# PRs; fork PRs fall back to the head SHA, so two runs for one fork PR can overlap. The action
+# re-fetches the PR before writing and skips all writes if the head moved, so an overlapping
+# older run cannot overwrite a newer verdict.
+concurrency:
+  group: agent-pr-gate-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  agent-pr-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - id: gate
+        # Replace <sha> with a full 40-character commit SHA from 0xgui/agent-pr-gate (and keep a
+        # version comment). Never use a branch name like @main: whoever can push to it controls your gate.
+        uses: 0xgui/agent-pr-gate@<sha> # vX.Y.Z
+        with:
+          ci-wait-seconds: '0'
+      - if: always() && steps.gate.outputs.metrics-path != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-pr-gate-metrics
+          path: ${{ steps.gate.outputs.metrics-path }}
