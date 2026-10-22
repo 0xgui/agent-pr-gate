@@ -218,6 +218,16 @@ describe('solo maintainer: requirements that no one but the author can meet', ()
     expect(decide(input).problems.find((x) => x.id === 'codeowners')!.cause).toBe('no-other-reviewer');
   });
 
+  it('does not say no-other-reviewer when an email co-owner owns the file with the author (#3)', () => {
+    const input = mk('tiers:\n  high: [".github/workflows/**"]\nrouting:\n  approvals: { high: 1 }\nmaintainers: ["@solo"]\n', {
+      codeowners: { ...noOwners, required: true, satisfied: false, owners: { users: ['solo'], teams: [] }, coverage: [{ file: '.github/workflows/ci.yml', owners: ['@solo', 'co@example.com'], status: 'pending', approvedBy: [] }] },
+    });
+    const p = decide(input).problems.find((x) => x.id === 'approvals')!;
+    expect(p.cause).toBeUndefined();
+    expect(p.what).not.toMatch(/only the author/i);
+    expect(p.fix).not.toMatch(/Only the author is listed|No reviewer is listed/);
+  });
+
   it('writes "1 approving review" in the tier line', () => {
     const input = mk('tiers:\n  high: [".github/workflows/**"]\nrouting:\n  approvals: { high: 1 }\n  high_requires_codeowners: false\n');
     expect(renderComment(input, decide(input), [])).toMatch(/needs 1 approving review\)/);
