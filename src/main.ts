@@ -6,7 +6,7 @@ import { configRefs, defaultConfig, GateConfig, parseConfig, Tier, TIERS } from 
 import { forcedIntoScope, inScope, renderOutOfScope, ScopePr } from './scope';
 import { classify } from './tiers';
 import { checkEvidence } from './evidence';
-import { evaluateCi, CiResult } from './ci';
+import { evaluateCi, CiResult, gateSuites, GateLookup, WorkflowRunLite } from './ci';
 import { codeownerCoverage, parseCodeowners, ownersFor, splitOwners } from './codeowners';
 import { approvalsFor, countRounds, isBotLogin, ReviewLite, timeToFirstHumanReview } from './reviews';
 import { CodeownersState, decide, GateInput, ownerOverrideFor, pickGateComments, renderComment } from './gate';
@@ -138,23 +138,68 @@ async function upsertComment(octokit: Octokit, repo: Repo, pr: number, body: str
   return { id: res.data.id, created: true };
 }
 
-async function readCi(octokit: Octokit, repo: Repo, sha: string, ignoreNames: string[]): Promise<CiResult> {
-  const checks = await octokit.paginate(octokit.rest.checks.listForRef, { ...repo, ref: sha, per_page: 100, filter: 'latest' });
-  const statuses = await octokit.paginate(octokit.rest.repos.listCommitStatusesForRef, { ...repo, ref: sha, per_page: 100 });
-  return evaluateCi(
-    checks.map((c) => ({ name: c.name, status: c.status, conclusion: c.conclusion, url: c.details_url ?? c.html_url })),
-    statuses.map((s) => ({ context: s.context, state: s.state })),
-    { names: ignoreNames, runId: String(github.context.runId) },
-  );
+/** Per-process caches for finding the gate's own checks (#2): runs per head SHA, files per path and ref. */
+const runsBySha = new Map<string, Promise<WorkflowRunLite[]>>();
+const workflowFiles = new Map<string, Promise<string | null>>();
+let gateLookupWarned = false;
+
+function gateLookup(octokit: Octokit, repo: Repo): GateLookup {
+  return {
+    runs: (sha, refresh) => {
+      if (refresh || !runsBySha.has(sha)) {
+        const p = octokit
+          .paginate(octokit.rest.actions.listWorkflowRunsForRepo, { ...repo, head_sha: sha, per_page: 100 })
+          .then((runs) => runs.map((r) => ({ checkSuiteId: r.check_suite_id ?? 0, path: r.path ?? '', event: r.event, headSha: r.head_sha })));
+        runsBySha.set(sha, p);
+        p.catch(() => runsBySha.delete(sha));
+      }
+      return runsBySha.get(sha)!;
+    },
+    workflow: (path, ref) => {
+      const key = `${path}@${ref}`;
+      if (!workflowFiles.has(key)) {
+        const p = readFile(octokit, repo, path, ref);
+        workflowFiles.set(key, p);
+        p.catch(() => workflowFiles.delete(key));
+      }
+      return workflowFiles.get(key)!;
+    },
+  };
 }
 
-async function waitForCi(octokit: Octokit, repo: Repo, sha: string, ignoreNames: string[], waitSeconds: number): Promise<CiResult> {
+/** True for a step `uses:` that is this action: owner/repo@ref, or ./ in the action's own repo. */
+function usesThisAction(ref: string): boolean {
+  const u = ref.trim().toLowerCase();
+  const action = (process.env.GITHUB_ACTION_REPOSITORY ?? '').toLowerCase();
+  if (action && (u.startsWith(`${action}@`) || u.startsWith(`${action}/`))) return true;
+  const here = `${github.context.repo.owner}/${github.context.repo.repo}`.toLowerCase();
+  return (u === './' || u === '.') && (!action || action === here);
+}
+
+async function readCi(octokit: Octokit, repo: Repo, sha: string, defaultBranch: string, ignoreNames: string[]): Promise<CiResult> {
+  const checks = await octokit.paginate(octokit.rest.checks.listForRef, { ...repo, ref: sha, per_page: 100, filter: 'latest' });
+  const statuses = await octokit.paginate(octokit.rest.repos.listCommitStatusesForRef, { ...repo, ref: sha, per_page: 100 });
+  const lite = checks.map((c) => ({ name: c.name, status: c.status, conclusion: c.conclusion, url: c.details_url ?? c.html_url, suiteId: c.check_suite?.id ?? null }));
+  const runId = String(github.context.runId);
+  const job = github.context.job;
+  let suites: number[] | undefined;
+  try {
+    suites = await gateSuites(lite, { job, runId }, sha, defaultBranch, usesThisAction, gateLookup(octokit, repo));
+  } catch (e) {
+    // Without actions: read the workflow runs can't be read; fall back to skipping by job name.
+    if (!gateLookupWarned) core.warning(`Could not map checks to workflow runs (${(e as Error).message}); skipping every check named "${job}". Grant actions: read to fix this.`);
+    gateLookupWarned = true;
+  }
+  return evaluateCi(lite, statuses.map((s) => ({ context: s.context, state: s.state })), { names: ignoreNames, runId, job, gateSuites: suites });
+}
+
+async function waitForCi(octokit: Octokit, repo: Repo, sha: string, defaultBranch: string, ignoreNames: string[], waitSeconds: number): Promise<CiResult> {
   const deadline = Date.now() + waitSeconds * 1000;
-  let ci = await readCi(octokit, repo, sha, ignoreNames);
+  let ci = await readCi(octokit, repo, sha, defaultBranch, ignoreNames);
   while ((ci.state === 'pending' || ci.state === 'none') && Date.now() < deadline) {
     core.info(`CI is ${ci.state}; waiting (pending: ${ci.pending.join(', ') || 'none yet'})`);
     await new Promise((r) => setTimeout(r, 15000));
-    ci = await readCi(octokit, repo, sha, ignoreNames);
+    ci = await readCi(octokit, repo, sha, defaultBranch, ignoreNames);
   }
   return ci;
 }
@@ -298,12 +343,11 @@ function revertsOnce(octokit: Octokit, repo: Repo): (key: string) => Promise<Met
   return revertCache;
 }
 
-/** Check names and status contexts that are the gate itself, never part of the CI verdict. */
+/** Check names and status contexts that are the gate itself, never part of the CI verdict. The job's own checks are found by workflow in readCi (#2). */
 function baseIgnores(): string[] {
   const statusContext = core.getInput('status-context');
   return [
     ...core.getInput('ignore-checks').split(',').map((s) => s.trim()).filter(Boolean),
-    github.context.job,
     ...(statusContext ? [statusContext] : []),
   ];
 }
@@ -409,7 +453,7 @@ async function currentFingerprint(octokit: Octokit, repo: Repo, prNumber: number
   const { data: pr } = await octokit.rest.pulls.get({ ...repo, pull_number: prNumber });
   const cfg = await configFor(octokit, repo, pr);
   const reviews = await listReviews(octokit, repo, prNumber);
-  const ci = await readCi(octokit, repo, pr.head.sha, ciIgnores(cfg));
+  const ci = await readCi(octokit, repo, pr.head.sha, pr.base.repo.default_branch, ciIgnores(cfg));
   return fingerprint(toInputs(pr, reviews, { author: pr.user?.login ?? '', trustedAssociations: cfg.trustedAssociations }), ci);
 }
 
@@ -556,8 +600,8 @@ async function evaluatePr(octokit: Octokit, repo: Repo, prNumber: number, ciWait
 
   // One CI snapshot for the verdict and the fingerprint (#11).
   const snapshot = cfg.requireGreenCi
-    ? await waitForCi(octokit, repo, pr.head.sha, ciIgnores(cfg), ciWaitSeconds)
-    : await readCi(octokit, repo, pr.head.sha, ciIgnores(cfg));
+    ? await waitForCi(octokit, repo, pr.head.sha, pr.base.repo.default_branch, ciIgnores(cfg), ciWaitSeconds)
+    : await readCi(octokit, repo, pr.head.sha, pr.base.repo.default_branch, ciIgnores(cfg));
   const ci: CiResult | null = cfg.requireGreenCi ? snapshot : null;
 
   const input: GateInput = {

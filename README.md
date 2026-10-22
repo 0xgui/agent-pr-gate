@@ -40,6 +40,7 @@ You need a repository with a CI workflow and permission to edit branch protectio
 	  pull-requests: write  # labels and review requests
 	  issues: write         # the gate comment
 	  checks: read          # the CI verdict
+	  actions: read         # find the gate's own job checks
 	  statuses: write       # the agent-pr-gate commit status
 
 	jobs:
@@ -58,7 +59,9 @@ You need a repository with a CI workflow and permission to edit branch protectio
 
 Require only the `agent-pr-gate` commit status. Don't require the `agent-pr-gate-job` job check. The job check is named after the job ID, and it can be green when the PR isn't: a stale run (the PR changed during the check) writes no status and passes. With `fail-on-block: 'false'`, a blocked run passes too. Keep the job ID different from the status context, so a required `agent-pr-gate` can only match the status.
 
-Use the same job ID, `agent-pr-gate-job`, in every workflow that runs the gate, including the scheduled re-check. The gate skips its own check run by job ID, so a re-check job with another ID would count the event job's check as CI. If you use another job ID, add it to `ignore-checks`. The CI check ignores every check run named like the job ID, from any workflow, so don't give any other job that name.
+Use the same job ID, `agent-pr-gate-job`, in every workflow that runs the gate, including the scheduled re-check. The gate skips a check run named like its job ID only when that check's workflow run comes from a workflow file where the job uses this action, so its own checks from any run (also failed or cancelled earlier runs) are skipped, and a CI job with the same name in another workflow still counts. A re-check job with another ID would count the event job's check as CI. If you use another job ID, add it to `ignore-checks`, which skips by name.
+
+This needs `actions: read`. When a check run shares the job's name, the gate lists the workflow runs for the head SHA (one call, cached per SHA) and reads the workflow file of each such run (cached per file and ref, so a sweep reads a default-branch file once). That is about one more API call per checked PR, which the sweep budget includes. Without `actions: read`, the gate warns and falls back to skipping every check run named like the job ID.
 
 `ci-wait-seconds` makes the first run wait for your CI. With `0`, the first status is often `ci:pending`, and the gate runs again through `workflow_run` when CI finishes. That re-run also works only from the default branch. A higher value holds a runner while the gate waits, so set it to about your CI's usual duration.
 
@@ -385,7 +388,7 @@ Time to first human review runs from PR creation to the first review by someone 
 - Use `pull_request_target`, so fork PRs get a token that can comment and add labels. That event runs the workflow from the default branch with a write token. Never check out or run PR code in the gate workflow. The action reads the PR only through the API.
 - The gate reads config and CODEOWNERS from the base commit, so a PR can't lower its own tier or remove its own owners.
 - The PR description is untrusted text. The action only parses it. Quote the action's outputs if you use them in `run:` steps.
-- Grant only the permissions in the example: `contents: read`, `pull-requests: write`, `issues: write`, `checks: read`, and `statuses: write`.
+- Grant only the permissions in the example: `contents: read`, `pull-requests: write`, `issues: write`, `checks: read`, `actions: read`, and `statuses: write`.
 - `pull_request_review` events for fork PRs get a read-only token, so the gate can't write there. Use the review relay in `examples/review-relay.yml`, and rely on branch protection to enforce reviews.
 - Before it writes, the gate re-reads the PR. If the head, base, description, draft state, or trusted reviews changed, it checks again, up to 2 more times. If they keep changing, it reports `stale` and writes nothing.
 - `workflow_run` runs from the default branch with a write token, even when a fork triggered it. Never run artifacts or code from the triggering run in this workflow.

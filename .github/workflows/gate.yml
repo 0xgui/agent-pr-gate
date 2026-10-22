@@ -18,6 +18,7 @@ permissions:
   pull-requests: write
   issues: write
   checks: read
+  actions: read
   statuses: write
 
 concurrency:

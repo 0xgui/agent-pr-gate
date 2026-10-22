@@ -18,6 +18,7 @@ permissions:
   pull-requests: write  # labels, review requests
   issues: write         # the gate comment, creating labels
   checks: read          # CI verdict
+  actions: read         # tell the gate's own job checks from CI jobs with the same name
   statuses: write       # the agent-pr-gate commit status
 
 # One gate run per PR at a time. workflow_run payloads only carry the PR number for same-repo

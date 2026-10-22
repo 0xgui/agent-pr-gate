@@ -27145,7 +27145,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse4(src, reviver, options) {
+    function parse5(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -27186,7 +27186,7 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports2.parse = parse4;
+    exports2.parse = parse5;
     exports2.parseAllDocuments = parseAllDocuments;
     exports2.parseDocument = parseDocument2;
     exports2.stringify = stringify;
@@ -34566,12 +34566,16 @@ function forcedIntoScope(cfg, fileObjs, changedFiles) {
 }
 
 // src/ci.ts
+var import_yaml2 = __toESM(require_dist());
 var OK = /* @__PURE__ */ new Set(["success", "neutral", "skipped"]);
 function evaluateCi(checks, statuses, ignore) {
   const skip = new Set(ignore.names.map((n) => n.toLowerCase()));
+  const job = ignore.job?.toLowerCase();
+  const gate = ignore.gateSuites ? new Set(ignore.gateSuites) : null;
   const res = { state: "none", failing: [], pending: [], passed: [] };
   for (const c of checks) {
     if (skip.has(c.name.toLowerCase())) continue;
+    if (job && c.name.toLowerCase() === job && (!gate || c.suiteId != null && gate.has(c.suiteId))) continue;
     if (ignore.runId && c.url && c.url.includes(`/actions/runs/${ignore.runId}/`)) continue;
     if (c.status !== "completed") res.pending.push(c.name);
     else if (OK.has(c.conclusion ?? "")) res.passed.push(c.name);
@@ -34590,6 +34594,41 @@ function evaluateCi(checks, statuses, ignore) {
   else if (res.pending.length) res.state = "pending";
   else if (res.passed.length) res.state = "green";
   return res;
+}
+function gateJobNames(text, uses) {
+  const out = /* @__PURE__ */ new Set();
+  let doc;
+  try {
+    doc = (0, import_yaml2.parse)(text);
+  } catch {
+    return out;
+  }
+  const jobs = doc?.jobs;
+  if (!jobs || typeof jobs !== "object") return out;
+  for (const [id, job] of Object.entries(jobs)) {
+    const steps = Array.isArray(job?.steps) ? job.steps : [];
+    if (!steps.some((s) => typeof s?.uses === "string" && uses(s.uses))) continue;
+    out.add((typeof job.name === "string" ? job.name : id).toLowerCase());
+  }
+  return out;
+}
+async function gateSuites(checks, ignore, sha, defaultBranch, uses, lookup) {
+  const job = ignore.job.toLowerCase();
+  const candidates = checks.filter(
+    (c) => c.name.toLowerCase() === job && c.suiteId != null && !(ignore.runId && c.url && c.url.includes(`/actions/runs/${ignore.runId}/`))
+  );
+  if (!candidates.length) return [];
+  const want = new Set(candidates.map((c) => c.suiteId));
+  let runs = await lookup.runs(sha, false);
+  if ([...want].some((id) => !runs.some((r) => r.checkSuiteId === id))) runs = await lookup.runs(sha, true);
+  const out = [];
+  for (const r of runs) {
+    if (!want.has(r.checkSuiteId)) continue;
+    const ref = r.event === "pull_request_target" ? defaultBranch : r.headSha;
+    const text = await lookup.workflow(r.path.split("@")[0], ref);
+    if (text !== null && gateJobNames(text, uses).has(job)) out.push(r.checkSuiteId);
+  }
+  return out;
 }
 
 // src/codeowners.ts
@@ -34834,8 +34873,8 @@ async function planSweep(cands, currentFingerprint2, opts, guard, onError) {
   }
   return plan;
 }
-var EVALUATION_CALLS = 20;
-var FINGERPRINT_CALLS = 5;
+var EVALUATION_CALLS = 21;
+var FINGERPRINT_CALLS = 6;
 var STATE_READ_CALLS = 1;
 function sweepReserve(n) {
   const pages = Math.max(1, n.pages ?? 1);
@@ -34978,22 +35017,59 @@ async function upsertComment(octokit, repo, pr, body, listed) {
   const res = await octokit.rest.issues.createComment({ ...repo, issue_number: pr, body });
   return { id: res.data.id, created: true };
 }
-async function readCi(octokit, repo, sha, ignoreNames) {
+var runsBySha = /* @__PURE__ */ new Map();
+var workflowFiles = /* @__PURE__ */ new Map();
+var gateLookupWarned = false;
+function gateLookup(octokit, repo) {
+  return {
+    runs: (sha, refresh) => {
+      if (refresh || !runsBySha.has(sha)) {
+        const p = octokit.paginate(octokit.rest.actions.listWorkflowRunsForRepo, { ...repo, head_sha: sha, per_page: 100 }).then((runs) => runs.map((r) => ({ checkSuiteId: r.check_suite_id ?? 0, path: r.path ?? "", event: r.event, headSha: r.head_sha })));
+        runsBySha.set(sha, p);
+        p.catch(() => runsBySha.delete(sha));
+      }
+      return runsBySha.get(sha);
+    },
+    workflow: (path3, ref) => {
+      const key = `${path3}@${ref}`;
+      if (!workflowFiles.has(key)) {
+        const p = readFile(octokit, repo, path3, ref);
+        workflowFiles.set(key, p);
+        p.catch(() => workflowFiles.delete(key));
+      }
+      return workflowFiles.get(key);
+    }
+  };
+}
+function usesThisAction(ref) {
+  const u = ref.trim().toLowerCase();
+  const action = (process.env.GITHUB_ACTION_REPOSITORY ?? "").toLowerCase();
+  if (action && (u.startsWith(`${action}@`) || u.startsWith(`${action}/`))) return true;
+  const here = `${context2.repo.owner}/${context2.repo.repo}`.toLowerCase();
+  return (u === "./" || u === ".") && (!action || action === here);
+}
+async function readCi(octokit, repo, sha, defaultBranch, ignoreNames) {
   const checks = await octokit.paginate(octokit.rest.checks.listForRef, { ...repo, ref: sha, per_page: 100, filter: "latest" });
   const statuses = await octokit.paginate(octokit.rest.repos.listCommitStatusesForRef, { ...repo, ref: sha, per_page: 100 });
-  return evaluateCi(
-    checks.map((c) => ({ name: c.name, status: c.status, conclusion: c.conclusion, url: c.details_url ?? c.html_url })),
-    statuses.map((s) => ({ context: s.context, state: s.state })),
-    { names: ignoreNames, runId: String(context2.runId) }
-  );
+  const lite = checks.map((c) => ({ name: c.name, status: c.status, conclusion: c.conclusion, url: c.details_url ?? c.html_url, suiteId: c.check_suite?.id ?? null }));
+  const runId = String(context2.runId);
+  const job = context2.job;
+  let suites;
+  try {
+    suites = await gateSuites(lite, { job, runId }, sha, defaultBranch, usesThisAction, gateLookup(octokit, repo));
+  } catch (e) {
+    if (!gateLookupWarned) warning(`Could not map checks to workflow runs (${e.message}); skipping every check named "${job}". Grant actions: read to fix this.`);
+    gateLookupWarned = true;
+  }
+  return evaluateCi(lite, statuses.map((s) => ({ context: s.context, state: s.state })), { names: ignoreNames, runId, job, gateSuites: suites });
 }
-async function waitForCi(octokit, repo, sha, ignoreNames, waitSeconds) {
+async function waitForCi(octokit, repo, sha, defaultBranch, ignoreNames, waitSeconds) {
   const deadline = Date.now() + waitSeconds * 1e3;
-  let ci = await readCi(octokit, repo, sha, ignoreNames);
+  let ci = await readCi(octokit, repo, sha, defaultBranch, ignoreNames);
   while ((ci.state === "pending" || ci.state === "none") && Date.now() < deadline) {
     info(`CI is ${ci.state}; waiting (pending: ${ci.pending.join(", ") || "none yet"})`);
     await new Promise((r) => setTimeout(r, 15e3));
-    ci = await readCi(octokit, repo, sha, ignoreNames);
+    ci = await readCi(octokit, repo, sha, defaultBranch, ignoreNames);
   }
   return ci;
 }
@@ -35107,7 +35183,6 @@ function baseIgnores() {
   const statusContext = getInput("status-context");
   return [
     ...getInput("ignore-checks").split(",").map((s) => s.trim()).filter(Boolean),
-    context2.job,
     ...statusContext ? [statusContext] : []
   ];
 }
@@ -35180,7 +35255,7 @@ async function currentFingerprint(octokit, repo, prNumber) {
   const { data: pr } = await octokit.rest.pulls.get({ ...repo, pull_number: prNumber });
   const cfg = await configFor(octokit, repo, pr);
   const reviews = await listReviews(octokit, repo, prNumber);
-  const ci = await readCi(octokit, repo, pr.head.sha, ciIgnores(cfg));
+  const ci = await readCi(octokit, repo, pr.head.sha, pr.base.repo.default_branch, ciIgnores(cfg));
   return fingerprint(toInputs(pr, reviews, { author: pr.user?.login ?? "", trustedAssociations: cfg.trustedAssociations }), ci);
 }
 async function storedState(octokit, repo, prNumber, identity) {
@@ -35281,7 +35356,7 @@ async function evaluatePr(octokit, repo, prNumber, ciWaitSeconds, scopeNote) {
     ...(pr.requested_reviewers ?? []).map((r) => r.login.toLowerCase()),
     ...(pr.requested_teams ?? []).map((t) => t.slug.toLowerCase())
   ]);
-  const snapshot = cfg.requireGreenCi ? await waitForCi(octokit, repo, pr.head.sha, ciIgnores(cfg), ciWaitSeconds) : await readCi(octokit, repo, pr.head.sha, ciIgnores(cfg));
+  const snapshot = cfg.requireGreenCi ? await waitForCi(octokit, repo, pr.head.sha, pr.base.repo.default_branch, ciIgnores(cfg), ciWaitSeconds) : await readCi(octokit, repo, pr.head.sha, pr.base.repo.default_branch, ciIgnores(cfg));
   const ci = cfg.requireGreenCi ? snapshot : null;
   const input = {
     cfg,

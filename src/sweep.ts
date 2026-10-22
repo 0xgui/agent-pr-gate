@@ -89,15 +89,15 @@ export async function planSweep(
 
 /**
  * Rough core-API cost of one evaluation and its writes (PR, config, files, reviews, timeline,
- * CODEOWNERS, CI polls, labels, comment, status). Used to reserve budget during discovery (#13).
+ * CODEOWNERS, CI polls, workflow runs, labels, comment, status). Used to reserve budget during discovery (#13).
  */
-export const EVALUATION_CALLS = 20;
+export const EVALUATION_CALLS = 21;
 
 /**
- * Core calls for one fingerprint (PR, config, reviews, checks, statuses) and one state read, at
+ * Core calls for one fingerprint (PR, config, reviews, checks, statuses, workflow runs) and one state read, at
  * one page each. sweepReserve scales them by the most pages a state read has used so far (#34).
  */
-export const FINGERPRINT_CALLS = 5;
+export const FINGERPRINT_CALLS = 6;
 export const STATE_READ_CALLS = 1;
 
 /** Calls to keep for discovery still to come and the evaluations it may plan (#28). */
