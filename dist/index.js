@@ -34375,8 +34375,10 @@ function decide(input) {
   if (override && approvers.length < need) waived.push(`${need} approving review(s)`);
   if (approvers.length < need && !override) {
     const reviewers = eligibleReviewers(input);
-    const onlyAuthor = reviewers.length === 0 && input.cfg.maintainers.length > 0;
-    const listHint = onlyAuthor ? ` Only the author is listed in maintainers${input.codeowners.required ? " and CODEOWNERS" : ""}, and the author's approval never counts. If nobody else has write access, this can never pass. To fix it, add another reviewer (maintainers, CODEOWNERS and repo access), set routing.approvals.${tier.tier}: 0 in ${input.cfg.path} (evidence and CI still apply), or merge with an admin bypass.` : reviewers.length === 0 ? " No reviewer is listed in maintainers or CODEOWNERS, so anyone with write access other than the author can approve." : "";
+    const emailOwners = (input.codeowners.coverage ?? []).flatMap((c) => c.owners).filter((o) => !o.startsWith("@"));
+    const noOther = reviewers.length === 0 && emailOwners.length === 0;
+    const onlyAuthor = noOther && input.cfg.maintainers.length > 0;
+    const listHint = onlyAuthor ? ` Only the author is listed in maintainers${input.codeowners.required ? " and CODEOWNERS" : ""}, and the author's approval never counts. If nobody else has write access, this can never pass. To fix it, add another reviewer (maintainers, CODEOWNERS and repo access), set routing.approvals.${tier.tier}: 0 in ${input.cfg.path} (evidence and CI still apply), or merge with an admin bypass.` : noOther ? " No reviewer is listed in maintainers or CODEOWNERS, so anyone with write access other than the author can approve." : "";
     problems.push({
       id: "approvals",
       what: `Needs ${need} approving human review(s), has ${approvers.length}` + (onlyAuthor ? " (only the author is listed as a reviewer)" : ""),
