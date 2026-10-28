@@ -379,6 +379,20 @@ With `pr-number: open`, the gate checks open PRs as a backstop for missed events
 
 The gate reads the state only from comments that its own identity wrote. Every workflow in a repository shares the default identity, `github-actions[bot]`. If other workflows post comments, run the gate with a GitHub App token and set `comment-author` to that app's bot login (for example `my-app[bot]`). Setting `comment-author` alone does not help with the default token, because the gate still posts as `github-actions[bot]`.
 
+### Check a PR without a workflow
+
+Where nothing reads the commit status (no branch protection, for example a private repo on GitHub Free), a merge script can ask for the verdict once, at merge time, instead of keeping the status fresh with re-runs:
+
+```sh
+GH_TOKEN=... npx github:0xgui/agent-pr-gate#<sha> check 41 --repo owner/repo
+```
+
+`check` reads what the action reads, from the same base commit, and decides the same way. It writes nothing: no comment, label, review request, or status. It prints the verdict as JSON on stdout (`result`, `tier`, `required_approvals`, `approvals`, `rounds`, `round_cap_reached`, `missing`, and each problem in full) and logs on stderr. It exits 0 when the PR passes or is not in scope, 1 when it is blocked, and 2 when it could not judge: an error, a PR that is not open, or a PR that changed while it read.
+
+The flags mirror the inputs that affect the verdict: `--config-path`, `--config-ref`, `--ci-wait-seconds`, `--ignore-checks`, and `--status-context`. `--gate-job` (default `agent-pr-gate-job`) and `--action` (default `0xgui/agent-pr-gate`) find the gate's own job checks, so they stay out of the CI verdict as in the action. The token comes from `GH_TOKEN` or `GITHUB_TOKEN`, the repository from `--repo` or the `origin` remote. Run `check --help` for the full list.
+
+The verdict is only as trustworthy as the machine that runs it. Use it where a local script already decides the merge, never in place of branch protection.
+
 ### Metrics
 
 Time to first human review runs from PR creation to the first review by someone who is not a bot or the author. Reverts are commits on the default branch, and merged PRs, whose title starts with `Revert`, within `revert_lookback_days`. The gate scans the 500 most recently updated closed PRs for reverts.
