@@ -47,12 +47,12 @@ You need a repository with a CI workflow and permission to edit branch protectio
 	  agent-pr-gate-job:
 	    runs-on: ubuntu-latest
 	    steps:
-	      - uses: 0xgui/agent-pr-gate@4dd96034b7e99d613b03c4eceb38264e349c442a # v1.0.3
+	      - uses: 0xgui/agent-pr-gate@aa883cd420612fd1aa57621a17148f4357c20ccd # v1.0.4
 	        with:
 	          ci-wait-seconds: '300'   # about as long as your CI usually takes
 	```
 
-	Pin the action to a full 40-character commit SHA and keep the version in a comment. The example pins `v1.0.3`. The tag `v1` points to the latest `v1.x.y` release. `@v1` is easier to keep current, but whoever can move that tag controls your gate, so a SHA is safer. Don't use a branch name such as `@main`.
+	Pin the action to a full 40-character commit SHA and keep the version in a comment. The example pins `v1.0.4`. The tag `v1` points to the latest `v1.x.y` release. `@v1` is easier to keep current, but whoever can move that tag controls your gate, so a SHA is safer. Don't use a branch name such as `@main`.
 
 2. Merge the workflow into the default branch. Then open a PR. The gate posts its comment and sets the `agent-pr-gate` commit status.
 3. In branch protection, make the `agent-pr-gate` commit status a required check. Keep required reviews and code owner review turned on. The gate reports and routes. Branch protection is what enforces reviews.
