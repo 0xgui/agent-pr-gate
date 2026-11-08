@@ -47,7 +47,7 @@ You need a repository with a CI workflow and permission to edit branch protectio
 	  agent-pr-gate-job:
 	    runs-on: ubuntu-latest
 	    steps:
-	      - uses: 0xgui/agent-pr-gate@2da570e75f377b413e19bdfc338dab7c9e881538 # v1.0.3
+	      - uses: 0xgui/agent-pr-gate@4dd96034b7e99d613b03c4eceb38264e349c442a # v1.0.3
 	        with:
 	          ci-wait-seconds: '300'   # about as long as your CI usually takes
 	```
@@ -412,7 +412,7 @@ Time to first human review runs from PR creation to the first review by someone 
 ## FAQ
 
 **Why is my PR blocked when the Testing section has text?**
-The text is probably a placeholder. `TODO`, `N/A`, `TBD`, a line that starts with an unchecked box (`- [ ]`), or a line like `Unit tests: TODO` counts as empty. Write what you ran and the result.
+The text is probably a placeholder. `TODO`, `TBD`, a line that is only `N/A`, a line that starts with an unchecked box (`- [ ]`), or a line like `Unit tests: TODO` counts as empty. Bare `N/A` is empty. `N/A, no runtime change` counts as content, because a comma is not a label separator and the words after `N/A` stay. `N/A: docs only` is empty, because the colon makes `N/A` a placeholder label. Write what you ran and the result. The full rule is in [docs/evidence-rule.md](docs/evidence-rule.md).
 
 **Why doesn't my approval count?**
 Approvals count only on the current head commit, from someone other than the author, with an `author_association` in `trusted_associations`. A new push makes earlier approvals stale.
