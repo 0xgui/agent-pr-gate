@@ -103,6 +103,40 @@ export interface GateResult {
   waived?: string[];
 }
 
+export type SoloState = { state: 'team' } | { state: 'applied' } | { state: 'held'; reason: string };
+
+/** People and teams named in config or CODEOWNERS, other than the author. */
+export function listedOthers(cfg: GateConfig, author: string, codeowners: CodeownersState): string[] {
+  const raw = [
+    ...cfg.maintainers,
+    ...cfg.owners,
+    ...codeowners.owners.users,
+    ...codeowners.owners.teams,
+    ...(codeowners.coverage ?? []).flatMap((c) => c.owners),
+  ];
+  const me = author.toLowerCase();
+  const out = new Set<string>();
+  for (const item of raw) {
+    const name = item.replace(/^@/, '');
+    if (name.toLowerCase() !== me) out.add(name);
+  }
+  return [...out];
+}
+
+/**
+ * `solo` waives high-tier reviews only when nobody else is listed.
+ * `team` never waives. A held result keeps the team rules.
+ */
+export function soloFor(cfg: GateConfig, author: string, codeowners: CodeownersState): SoloState {
+  if (cfg.mode !== 'solo') return { state: 'team' };
+  const uncovered = (codeowners.coverage ?? []).some((c) => c.status === 'no-owner' || c.status === 'team-unknown');
+  if (uncovered) return { state: 'held', reason: 'a high-tier file has no confirmed owner' };
+  const others = listedOthers(cfg, author, codeowners);
+  if (others.length === 0) return { state: 'applied' };
+  const shown = others.slice(0, 3).join(', ');
+  return { state: 'held', reason: `another owner is listed (${shown})` };
+}
+
 /** Maintainers and code owners other than the author. Empty means anyone with repo access. */
 function eligibleReviewers(input: GateInput): string[] {
   const all = [...input.cfg.maintainers, ...input.codeowners.owners.users, ...input.codeowners.owners.teams];
@@ -142,7 +176,9 @@ export function decide(input: GateInput): GateResult {
       who: 'reviewer',
     });
   }
-  const need = cfg.approvals[tier.tier];
+  const solo = soloFor(cfg, input.author, codeowners);
+  const soloHigh = solo.state === 'applied' && tier.tier === 'high';
+  const need = soloHigh ? 0 : cfg.approvals[tier.tier];
   const override = input.ownerOverride?.applies === true;
   const waived: string[] = [];
   if (override && approvers.length < need) waived.push(`${need} approving review(s)`);
@@ -173,7 +209,7 @@ export function decide(input: GateInput): GateResult {
       ...(onlyAuthor ? { cause: 'no-other-reviewer' as const } : {}),
     });
   }
-  if (codeowners.required && !codeowners.satisfied) {
+  if (codeowners.required && !codeowners.satisfied && !soloHigh) {
     const who = [...codeowners.owners.users.map((u) => `@${u}`), ...codeowners.owners.teams.map((t) => `@${t}`)];
     const open = (codeowners.coverage ?? []).filter((c) => c.status !== 'approved');
     const detail = open
@@ -255,6 +291,12 @@ export function renderComment(input: GateInput, result: GateResult, humans: stri
     if (tier.triggers.length > 10) lines.push(`- ...and ${tier.triggers.length - 10} more`);
   }
   lines.push('', `**Approvals:** ${input.approvers.length}/${result.requiredApprovals}${input.approvers.length ? ` (${input.approvers.map((a) => '@' + a).join(', ')})` : ''}${result.waived ? ' (waived)' : ''}`);
+  const solo = soloFor(cfg, input.author, input.codeowners);
+  if (solo.state === 'applied' && tier.tier === 'high') {
+    lines.push('**Solo mode:** applied. The author is the only listed owner, so this high-tier PR needs no other approval and no CODEOWNERS approval. Evidence and green CI still apply.');
+  } else if (solo.state === 'held' && tier.tier === 'high') {
+    lines.push(`**Solo mode:** not applied. ${solo.reason}. Team rules still apply.`);
+  }
   const ov = input.ownerOverride;
   if (ov?.applies && result.waived) {
     lines.push(`**Owner override:** approvals waived for repo owner @${ov.owner} (\`routing.owner_override\`): ${result.waived.join('; ')}. Evidence, CI and the round cap still apply.`);
@@ -310,7 +352,8 @@ export function renderComment(input: GateInput, result: GateResult, humans: stri
       ...(p.cause !== undefined ? { cause: p.cause } : {}),
     })),
     approvals: { have: input.approvers.length, need: result.requiredApprovals },
-    codeowners_required: input.codeowners.required,
+    codeowners_required: input.codeowners.required && !(solo.state === 'applied' && tier.tier === 'high'),
+    solo: solo.state,
     scope_note: input.scopeNote ?? null,
     owner_override: ov ? (ov.applies ? { owner: ov.owner, applied: true, waived: result.waived ?? [] } : { owner: ov.owner, applied: false, reason: ov.reason }) : null,
     rounds: { count: rounds.rounds, cap: cfg.roundCap, cap_reached: result.roundCapReached },

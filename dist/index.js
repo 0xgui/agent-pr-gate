@@ -31916,6 +31916,7 @@ var path2 = __toESM(require("path"));
 // src/config.ts
 var import_yaml = __toESM(require_dist());
 var TIERS = ["low", "medium", "high"];
+var GATE_MODES = ["team", "solo"];
 var DEFAULT_SECTIONS = [
   { name: "Testing", aliases: ["Tests", "Test plan"] },
   { name: "Risk", aliases: ["Risks"] },
@@ -31924,6 +31925,7 @@ var DEFAULT_SECTIONS = [
 function defaultConfig(path3 = ".review-gate.yml") {
   return {
     path: path3,
+    mode: "team",
     defaultTier: "medium",
     tiers: { low: [], medium: [], high: [] },
     sections: DEFAULT_SECTIONS.map((s) => ({ ...s, aliases: [...s.aliases] })),
@@ -31947,6 +31949,10 @@ var ConfigError = class extends Error {
 };
 function configRefs(configRef, pr) {
   return { rules: configRef === "head" ? pr.head.sha : pr.base.sha, scope: pr.base.sha };
+}
+function withBaseMode(rules, base) {
+  if (rules.mode === base.mode) return rules;
+  return { ...rules, mode: base.mode };
 }
 function isTier(v) {
   return typeof v === "string" && TIERS.includes(v);
@@ -31994,6 +32000,12 @@ function parseConfig(text, path3 = ".review-gate.yml") {
   const raw = doc.toJS() ?? {};
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new ConfigError(`${path3}: top level must be a mapping`);
+  }
+  if (raw.mode !== void 0) {
+    if (raw.mode !== "team" && raw.mode !== "solo") {
+      throw new ConfigError(`mode must be one of ${GATE_MODES.join(", ")}`);
+    }
+    cfg.mode = raw.mode;
   }
   if (raw.default_tier !== void 0) {
     if (!isTier(raw.default_tier)) throw new ConfigError(`default_tier must be one of ${TIERS.join(", ")}`);
@@ -34790,6 +34802,31 @@ function ownerOverrideFor(cfg, author, repoOwner, tier, files) {
   if (touched.length) return no(`the PR changes gate-control files (${touched.slice(0, 5).map((f) => "`" + f + "`").join(", ")}${touched.length > 5 ? ", ..." : ""})`);
   return { owner: author, applies: true };
 }
+function listedOthers(cfg, author, codeowners) {
+  const raw = [
+    ...cfg.maintainers,
+    ...cfg.owners,
+    ...codeowners.owners.users,
+    ...codeowners.owners.teams,
+    ...(codeowners.coverage ?? []).flatMap((c) => c.owners)
+  ];
+  const me = author.toLowerCase();
+  const out = /* @__PURE__ */ new Set();
+  for (const item of raw) {
+    const name = item.replace(/^@/, "");
+    if (name.toLowerCase() !== me) out.add(name);
+  }
+  return [...out];
+}
+function soloFor(cfg, author, codeowners) {
+  if (cfg.mode !== "solo") return { state: "team" };
+  const uncovered = (codeowners.coverage ?? []).some((c) => c.status === "no-owner" || c.status === "team-unknown");
+  if (uncovered) return { state: "held", reason: "a high-tier file has no confirmed owner" };
+  const others = listedOthers(cfg, author, codeowners);
+  if (others.length === 0) return { state: "applied" };
+  const shown = others.slice(0, 3).join(", ");
+  return { state: "held", reason: `another owner is listed (${shown})` };
+}
 function eligibleReviewers(input) {
   const all = [...input.cfg.maintainers, ...input.codeowners.owners.users, ...input.codeowners.owners.teams];
   return [...new Set(all)].filter((h) => h.toLowerCase() !== input.author.toLowerCase());
@@ -34826,7 +34863,9 @@ function decide(input) {
       who: "reviewer"
     });
   }
-  const need = cfg.approvals[tier.tier];
+  const solo = soloFor(cfg, input.author, codeowners);
+  const soloHigh = solo.state === "applied" && tier.tier === "high";
+  const need = soloHigh ? 0 : cfg.approvals[tier.tier];
   const override = input.ownerOverride?.applies === true;
   const waived = [];
   if (override && approvers.length < need) waived.push(`${need} approving review(s)`);
@@ -34846,7 +34885,7 @@ function decide(input) {
       ...onlyAuthor ? { cause: "no-other-reviewer" } : {}
     });
   }
-  if (codeowners.required && !codeowners.satisfied) {
+  if (codeowners.required && !codeowners.satisfied && !soloHigh) {
     const who = [...codeowners.owners.users.map((u) => `@${u}`), ...codeowners.owners.teams.map((t) => `@${t}`)];
     const open2 = (codeowners.coverage ?? []).filter((c) => c.status !== "approved");
     const detail = open2.slice(0, 10).map(
@@ -34907,6 +34946,12 @@ function renderComment(input, result, humans, state) {
     if (tier.triggers.length > 10) lines.push(`- ...and ${tier.triggers.length - 10} more`);
   }
   lines.push("", `**Approvals:** ${input.approvers.length}/${result.requiredApprovals}${input.approvers.length ? ` (${input.approvers.map((a) => "@" + a).join(", ")})` : ""}${result.waived ? " (waived)" : ""}`);
+  const solo = soloFor(cfg, input.author, input.codeowners);
+  if (solo.state === "applied" && tier.tier === "high") {
+    lines.push("**Solo mode:** applied. The author is the only listed owner, so this high-tier PR needs no other approval and no CODEOWNERS approval. Evidence and green CI still apply.");
+  } else if (solo.state === "held" && tier.tier === "high") {
+    lines.push(`**Solo mode:** not applied. ${solo.reason}. Team rules still apply.`);
+  }
   const ov = input.ownerOverride;
   if (ov?.applies && result.waived) {
     lines.push(`**Owner override:** approvals waived for repo owner @${ov.owner} (\`routing.owner_override\`): ${result.waived.join("; ")}. Evidence, CI and the round cap still apply.`);
@@ -34957,7 +35002,8 @@ function renderComment(input, result, humans, state) {
       ...p.cause !== void 0 ? { cause: p.cause } : {}
     })),
     approvals: { have: input.approvers.length, need: result.requiredApprovals },
-    codeowners_required: input.codeowners.required,
+    codeowners_required: input.codeowners.required && !(solo.state === "applied" && tier.tier === "high"),
+    solo: solo.state,
     scope_note: input.scopeNote ?? null,
     owner_override: ov ? ov.applies ? { owner: ov.owner, applied: true, waived: result.waived ?? [] } : { owner: ov.owner, applied: false, reason: ov.reason } : null,
     rounds: { count: rounds.rounds, cap: cfg.roundCap, cap_reached: result.roundCapReached }
@@ -35539,7 +35585,10 @@ async function evaluatePr(octokit, repo, s, prNumber, ciWaitSeconds, scopeNote) 
   const { data: pr } = await octokit.rest.pulls.get({ ...repo, pull_number: prNumber });
   if (pr.state !== "open") return null;
   const author = pr.user?.login ?? "";
-  const cfg = scopeNote ? await scopeConfigFor(octokit, repo, s, pr) : await configFor(octokit, repo, s, pr);
+  let cfg = scopeNote ? await scopeConfigFor(octokit, repo, s, pr) : await configFor(octokit, repo, s, pr);
+  if (!scopeNote && s.configRef === "head") {
+    cfg = withBaseMode(cfg, await scopeConfigFor(octokit, repo, s, pr));
+  }
   const fileObjs = await octokit.paginate(octokit.rest.pulls.listFiles, { ...repo, pull_number: prNumber, per_page: 100 });
   const files = fileObjs.flatMap((f) => f.previous_filename ? [f.filename, f.previous_filename] : [f.filename]);
   const tier = classify(files, cfg, { total: pr.changed_files, seen: fileObjs.length });
