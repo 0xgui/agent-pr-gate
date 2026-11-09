@@ -29,7 +29,7 @@ jobs:
   agent-pr-gate-job:
     runs-on: ubuntu-latest
     steps:
-      - uses: 0xgui/agent-pr-gate@2a781f1a0018f01e121f292951432c7ea84168c2 # v1.0.5
+      - uses: 0xgui/agent-pr-gate@fe659140ae81ad26dc0db5ba7585979f4feb12d5 # v1.0.5
         with:
           ci-wait-seconds: '300'
 ```
@@ -95,7 +95,7 @@ You need a repository with a CI workflow and permission to edit branch protectio
 	  agent-pr-gate-job:
 	    runs-on: ubuntu-latest
 	    steps:
-	      - uses: 0xgui/agent-pr-gate@2a781f1a0018f01e121f292951432c7ea84168c2 # v1.0.5
+	      - uses: 0xgui/agent-pr-gate@fe659140ae81ad26dc0db5ba7585979f4feb12d5 # v1.0.5
 	        with:
 	          ci-wait-seconds: '300'   # about as long as your CI usually takes
 	```
@@ -143,28 +143,15 @@ The gate keeps one comment per PR and edits it in place. A blocked PR looks like
 ```markdown
 ## ❌ agent-pr-gate: blocked
 
-**Risk tier:** `medium` (needs 1 approving review(s))
-
-**Why `medium`:**
-- `src/a.ts` matches no tier glob, so it gets default_tier `medium`
-
-**Approvals:** 0/1
-**CI:** green
-**Review/fix rounds:** 0/3
-
 ### What is missing
 
-1. **"## Testing" section is empty or only TODO**
-   - Where: PR description
-   - Fix: Add a "## Testing" heading with real content (template below). Edit the PR description; no new commit needed.
+1. **Replace the placeholder in "## Testing". A bare N/A does not count. Write a reason after N/A, for example `N/A, no runtime change`. `N/A: later` does not count.**
    - Who: author
-2. **Needs 1 approving human review(s), has 0**
-   - Where: PR reviews
-   - Fix: 1 more approval(s) on the current head commit from people with repo access, other than the author. Bot approvals do not count.
+2. **Get one more approval from someone other than the author.**
    - Who: reviewer
 ```
 
-Each missing item says where the problem is, how to fix it, and who has to act. For a missing or empty section, the comment also has a template to paste into the description. When everything passes, the same comment changes to "all requirements met".
+The first lines are the next action and who does it. Tier, approvals, CI, and the paste template are under Details. A maintainer-only item says you cannot fix it by editing the pull request, and names the config key, such as `mode: solo` or `routing.approvals.high`. When the pull request passes, the comment is one line, "This pull request passed."
 
 ## Use it from an agent
 
@@ -467,7 +454,7 @@ Time to first human review runs from PR creation to the first review by someone 
 ## FAQ
 
 **Why is my PR blocked when the Testing section has text?**
-The text is probably a placeholder. `TODO`, `TBD`, a line that is only `N/A`, a line that starts with an unchecked box (`- [ ]`), or a line like `Unit tests: TODO` counts as empty. Bare `N/A` is empty. `N/A, no runtime change` counts as content, because a comma is not a label separator and the words after `N/A` stay. `N/A: docs only` is empty, because the colon makes `N/A` a placeholder label. Write what you ran and the result. The full rule is in [docs/evidence-rule.md](docs/evidence-rule.md).
+The text is probably a placeholder. `TODO`, `TBD`, a line that is only `N/A`, a line that starts with an unchecked box (`- [ ]`), or a line like `Unit tests: TODO` counts as empty. Write a reason after `N/A`, for example `N/A, no runtime change`. `N/A: later` does not count. The full rule is in [docs/evidence-rule.md](docs/evidence-rule.md).
 
 **Why doesn't my approval count?**
 Approvals count only on the current head commit, from someone other than the author, with an `author_association` in `trusted_associations`. A new push makes earlier approvals stale.
