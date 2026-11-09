@@ -21,4 +21,4 @@ Observable end state: vitest prints the passing cases, and `evidence/solo.txt` c
 
 ## Gotchas
 
-This repository's own `.review-gate.yml` does not set `mode: solo`. A missing CODEOWNERS file does not block when solo applies and the author is the only maintainer. An incomplete file list still blocks.
+This repository's own `.review-gate.yml` does not set `mode: solo`. A missing CODEOWNERS file passes only when the author is a listed maintainer or the repository owner. A fork author with no listing stays blocked. An incomplete file list still blocks.

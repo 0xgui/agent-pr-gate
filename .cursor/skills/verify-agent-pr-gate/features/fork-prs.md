@@ -11,7 +11,7 @@ Read the Fork PRs section in the README Quick start. Do not copy those files unl
 
 ## Driving it with the solo fixture suite
 
-The fork case is `does not apply solo to a fork author who is not the listed maintainer` in `test/solo.test.ts`. The author is `forkuser` and the maintainer is `0xgui`. The verdict stays blocked.
+Two fork cases stay blocked. One lists `0xgui` as maintainer while the author is `forkuser`. The other has no CODEOWNERS file and empty owner lists, and the author is not the repository owner. The verdict stays blocked with `author is not a listed owner`.
 
 ## Gotchas
 

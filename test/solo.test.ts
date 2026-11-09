@@ -26,6 +26,7 @@ function high(body: string, author: string, over: Partial<GateInput> = {}): Gate
     approvers: [],
     codeowners,
     rounds: { rounds: 0, openedBy: [] },
+    repoOwner: 'other',
     ...over,
   };
 }
@@ -53,6 +54,7 @@ describe('solo mode', () => {
     expect(result.problems).toEqual([]);
     expect(comment(input)).toContain('**Solo mode:** applied.');
     expect(comment(input)).toContain('Evidence and green CI still apply.');
+    expect(comment(input)).toContain('sole owner');
   });
 
   it('still blocks a solo PR that is missing evidence', () => {
@@ -116,6 +118,46 @@ describe('solo mode', () => {
         requested: [],
       },
     });
+    expect(decide(input).pass).toBe(true);
+    expect(comment(input)).toContain('**Solo mode:** applied.');
+  });
+
+  it('holds solo when there is no CODEOWNERS file and the author is not the repo owner', () => {
+    const input = high('mode: solo', 'forkuser', {
+      repoOwner: '0xgui',
+      codeowners: {
+        required: true,
+        missingFile: true,
+        owners: { users: [], teams: [] },
+        approvedBy: [],
+        satisfied: false,
+        requested: [],
+      },
+    });
+    expect(decide(input).pass).toBe(false);
+    expect(comment(input)).toContain('author is not a listed owner');
+  });
+
+  it('applies solo when there is no CODEOWNERS file and the author is the repo owner', () => {
+    const input = high('mode: solo', 'alice', {
+      repoOwner: 'alice',
+      codeowners: {
+        required: true,
+        missingFile: true,
+        owners: { users: [], teams: [] },
+        approvedBy: [],
+        satisfied: false,
+        requested: [],
+      },
+    });
+    expect(decide(input).pass).toBe(true);
+    expect(comment(input)).toContain('**Solo mode:** applied.');
+  });
+
+  it('applies solo when CODEOWNERS names only the author', () => {
+    const input = high('mode: solo', 'alice', { repoOwner: 'other' });
+    expect(input.cfg.maintainers).toEqual([]);
+    expect(input.cfg.owners).toEqual([]);
     expect(decide(input).pass).toBe(true);
     expect(comment(input)).toContain('**Solo mode:** applied.');
   });

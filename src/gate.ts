@@ -44,6 +44,8 @@ export interface GateInput {
   ownerOverride?: OwnerOverride;
   /** Set when scope would skip the PR but its changes force it into scope. */
   scopeNote?: string;
+  /** User login that owns the repository. Set once where the PR is read. Empty when unknown. */
+  repoOwner: string;
 }
 
 export type OwnerOverride = { owner: string; applies: true } | { owner: string; applies: false; reason: string };
@@ -123,18 +125,28 @@ export function listedOthers(cfg: GateConfig, author: string, codeowners: Codeow
   return [...out];
 }
 
+function sameLogin(a: string, b: string): boolean {
+  return a.replace(/^@/, '').toLowerCase() === b.replace(/^@/, '').toLowerCase();
+}
+
+/** The author is named as an owner, or is the user who owns the repository. */
+function authorIsListedOwner(cfg: GateConfig, author: string, codeowners: CodeownersState, repoOwner: string): boolean {
+  if (repoOwner && sameLogin(author, repoOwner)) return true;
+  return [...cfg.maintainers, ...cfg.owners, ...codeowners.owners.users].some((name) => sameLogin(name, author));
+}
+
 /**
- * `solo` waives high-tier reviews only when nobody else is listed.
- * `team` never waives. A held result keeps the team rules.
+ * `solo` waives high-tier reviews only when the author is the sole owner.
+ * An empty owner list does not make every author the owner. `team` never waives.
  */
-export function soloFor(cfg: GateConfig, author: string, codeowners: CodeownersState): SoloState {
+export function soloFor(cfg: GateConfig, author: string, codeowners: CodeownersState, repoOwner: string): SoloState {
   if (cfg.mode !== 'solo') return { state: 'team' };
   const uncovered = (codeowners.coverage ?? []).some((c) => c.status === 'no-owner' || c.status === 'team-unknown');
   if (uncovered) return { state: 'held', reason: 'a high-tier file has no confirmed owner' };
   const others = listedOthers(cfg, author, codeowners);
-  if (others.length === 0) return { state: 'applied' };
-  const shown = others.slice(0, 3).join(', ');
-  return { state: 'held', reason: `another owner is listed (${shown})` };
+  if (others.length > 0) return { state: 'held', reason: `another owner is listed (${others.slice(0, 3).join(', ')})` };
+  if (!authorIsListedOwner(cfg, author, codeowners, repoOwner)) return { state: 'held', reason: 'author is not a listed owner' };
+  return { state: 'applied' };
 }
 
 /** Maintainers and code owners other than the author. Empty means anyone with repo access. */
@@ -176,7 +188,7 @@ export function decide(input: GateInput): GateResult {
       who: 'reviewer',
     });
   }
-  const solo = soloFor(cfg, input.author, codeowners);
+  const solo = soloFor(cfg, input.author, codeowners, input.repoOwner);
   const soloHigh = solo.state === 'applied' && tier.tier === 'high';
   const need = soloHigh ? 0 : cfg.approvals[tier.tier];
   const override = input.ownerOverride?.applies === true;
@@ -291,9 +303,9 @@ export function renderComment(input: GateInput, result: GateResult, humans: stri
     if (tier.triggers.length > 10) lines.push(`- ...and ${tier.triggers.length - 10} more`);
   }
   lines.push('', `**Approvals:** ${input.approvers.length}/${result.requiredApprovals}${input.approvers.length ? ` (${input.approvers.map((a) => '@' + a).join(', ')})` : ''}${result.waived ? ' (waived)' : ''}`);
-  const solo = soloFor(cfg, input.author, input.codeowners);
+  const solo = soloFor(cfg, input.author, input.codeowners, input.repoOwner);
   if (solo.state === 'applied' && tier.tier === 'high') {
-    lines.push('**Solo mode:** applied. The author is the only listed owner, so this high-tier PR needs no other approval and no CODEOWNERS approval. Evidence and green CI still apply.');
+    lines.push('**Solo mode:** applied. The author is the sole owner, so this high-tier PR needs no other approval and no CODEOWNERS approval. Evidence and green CI still apply.');
   } else if (solo.state === 'held' && tier.tier === 'high') {
     lines.push(`**Solo mode:** not applied. ${solo.reason}. Team rules still apply.`);
   }

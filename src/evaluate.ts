@@ -329,6 +329,7 @@ export async function evaluatePr(octokit: Octokit, repo: Repo, s: Settings, prNu
     codeowners,
     rounds,
     ownerOverride: ownerOverrideFor(cfg, author, repo.owner, tier.tier, files),
+    repoOwner: repo.owner,
   };
   if (input.ownerOverride) s.log.info(input.ownerOverride.applies ? `Owner override applies to @${author}.` : `Owner override not applied for @${author}: ${input.ownerOverride.reason}.`);
   const result = decide(input);

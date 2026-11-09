@@ -251,7 +251,7 @@ By default, the gate checks every PR, including PRs from people. A PR without th
 
 ### One-person repositories
 
-Set `mode: solo` on the base branch when one person owns the repository. If that person is the only name in `maintainers`, `routing.owners`, and CODEOWNERS, a high-tier pull request needs no other approval and no CODEOWNERS approval. Evidence and green CI still apply. The comment says `Solo mode: applied`. If anyone else is listed, including a CODEOWNERS team, team rules stay in force.
+Set `mode: solo` on the base branch when one person owns the repository. Solo applies only when that person is the author, and they are named in `maintainers`, `routing.owners`, or CODEOWNERS, or their login is the user who owns the repository. Nobody else may be listed. A high-tier pull request then needs no other approval and no CODEOWNERS approval. Evidence and green CI still apply. The comment says `Solo mode: applied`. An empty owner list does not waive reviews for a fork author or another collaborator. If anyone else is listed, including a CODEOWNERS team, team rules stay in force.
 
 `mode` is read from the base commit. A pull request cannot turn solo mode on by editing the head copy, even with `config-ref: head`.
 

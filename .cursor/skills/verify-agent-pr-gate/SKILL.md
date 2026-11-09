@@ -35,7 +35,7 @@ Run doctor when a check fails before you trust the suite. The bundles must exist
 npx vitest run test/solo.test.ts
 ```
 
-The suite is the fixture payload. It covers team default, solo with one owner, missing evidence, red CI, a second maintainer, `routing.owners`, a CODEOWNERS team, a missing CODEOWNERS file, a fork author, a cut-off file list, an unknown `mode`, and head config that must not override the base `mode`.
+The suite is the fixture payload. It covers team default, solo with one owner, missing evidence, red CI, a second maintainer, `routing.owners`, a CODEOWNERS team, a missing CODEOWNERS file for a listed maintainer, a missing CODEOWNERS file for a fork author, a missing CODEOWNERS file for the repository owner, CODEOWNERS that name only the author, a file with no owner, a cut-off file list, an unknown `mode`, and head config that must not override the base `mode`.
 
 ## Evidence
 

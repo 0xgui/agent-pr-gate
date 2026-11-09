@@ -34818,14 +34818,21 @@ function listedOthers(cfg, author, codeowners) {
   }
   return [...out];
 }
-function soloFor(cfg, author, codeowners) {
+function sameLogin(a, b) {
+  return a.replace(/^@/, "").toLowerCase() === b.replace(/^@/, "").toLowerCase();
+}
+function authorIsListedOwner(cfg, author, codeowners, repoOwner) {
+  if (repoOwner && sameLogin(author, repoOwner)) return true;
+  return [...cfg.maintainers, ...cfg.owners, ...codeowners.owners.users].some((name) => sameLogin(name, author));
+}
+function soloFor(cfg, author, codeowners, repoOwner) {
   if (cfg.mode !== "solo") return { state: "team" };
   const uncovered = (codeowners.coverage ?? []).some((c) => c.status === "no-owner" || c.status === "team-unknown");
   if (uncovered) return { state: "held", reason: "a high-tier file has no confirmed owner" };
   const others = listedOthers(cfg, author, codeowners);
-  if (others.length === 0) return { state: "applied" };
-  const shown = others.slice(0, 3).join(", ");
-  return { state: "held", reason: `another owner is listed (${shown})` };
+  if (others.length > 0) return { state: "held", reason: `another owner is listed (${others.slice(0, 3).join(", ")})` };
+  if (!authorIsListedOwner(cfg, author, codeowners, repoOwner)) return { state: "held", reason: "author is not a listed owner" };
+  return { state: "applied" };
 }
 function eligibleReviewers(input) {
   const all = [...input.cfg.maintainers, ...input.codeowners.owners.users, ...input.codeowners.owners.teams];
@@ -34863,7 +34870,7 @@ function decide(input) {
       who: "reviewer"
     });
   }
-  const solo = soloFor(cfg, input.author, codeowners);
+  const solo = soloFor(cfg, input.author, codeowners, input.repoOwner);
   const soloHigh = solo.state === "applied" && tier.tier === "high";
   const need = soloHigh ? 0 : cfg.approvals[tier.tier];
   const override = input.ownerOverride?.applies === true;
@@ -34946,9 +34953,9 @@ function renderComment(input, result, humans, state) {
     if (tier.triggers.length > 10) lines.push(`- ...and ${tier.triggers.length - 10} more`);
   }
   lines.push("", `**Approvals:** ${input.approvers.length}/${result.requiredApprovals}${input.approvers.length ? ` (${input.approvers.map((a) => "@" + a).join(", ")})` : ""}${result.waived ? " (waived)" : ""}`);
-  const solo = soloFor(cfg, input.author, input.codeowners);
+  const solo = soloFor(cfg, input.author, input.codeowners, input.repoOwner);
   if (solo.state === "applied" && tier.tier === "high") {
-    lines.push("**Solo mode:** applied. The author is the only listed owner, so this high-tier PR needs no other approval and no CODEOWNERS approval. Evidence and green CI still apply.");
+    lines.push("**Solo mode:** applied. The author is the sole owner, so this high-tier PR needs no other approval and no CODEOWNERS approval. Evidence and green CI still apply.");
   } else if (solo.state === "held" && tier.tier === "high") {
     lines.push(`**Solo mode:** not applied. ${solo.reason}. Team rules still apply.`);
   }
@@ -35629,7 +35636,8 @@ async function evaluatePr(octokit, repo, s, prNumber, ciWaitSeconds, scopeNote) 
     ignoredApprovals: { stale: approval.stale, untrusted: approval.untrusted },
     codeowners,
     rounds,
-    ownerOverride: ownerOverrideFor(cfg, author, repo.owner, tier.tier, files)
+    ownerOverride: ownerOverrideFor(cfg, author, repo.owner, tier.tier, files),
+    repoOwner: repo.owner
   };
   if (input.ownerOverride) s.log.info(input.ownerOverride.applies ? `Owner override applies to @${author}.` : `Owner override not applied for @${author}: ${input.ownerOverride.reason}.`);
   const result = decide(input);
