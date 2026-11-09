@@ -47,7 +47,7 @@ You need a repository with a CI workflow and permission to edit branch protectio
 	  agent-pr-gate-job:
 	    runs-on: ubuntu-latest
 	    steps:
-	      - uses: 0xgui/agent-pr-gate@aa883cd420612fd1aa57621a17148f4357c20ccd # v1.0.4
+	      - uses: 0xgui/agent-pr-gate@1cbe48bc4c397dd4f23ba6f47fdd6db6774f34de # v1.0.4
 	        with:
 	          ci-wait-seconds: '300'   # about as long as your CI usually takes
 	```
