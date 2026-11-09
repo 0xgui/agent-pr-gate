@@ -3,7 +3,7 @@
 ## Sub-features
 
 - Copy one workflow.
-- Pin the action to the v1.0.4 commit.
+- Pin the action to the v1.0.5 commit.
 - Require the `agent-pr-gate` status.
 
 ## How to get to it (user POV)
@@ -16,4 +16,4 @@ The workflow file is documentation. The behavior it turns on is the default team
 
 ## Gotchas
 
-The pin comment says `v1.0.4`. The SHA is the release commit `1cbe48bc4c397dd4f23ba6f47fdd6db6774f34de`. `@v1` is mentioned as a shorter option and is not the recommended pin.
+The pin comment says `v1.0.5`. The SHA is the release commit `2a781f1a0018f01e121f292951432c7ea84168c2`. `@v1` is mentioned as a shorter option and is not the recommended pin.
