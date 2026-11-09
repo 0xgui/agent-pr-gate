@@ -2,6 +2,54 @@
 
 A GitHub Action that checks pull requests from AI agents before a human reviews them.
 
+## Quick start
+
+You need a repository that already runs CI. You do not need a `.review-gate.yml` file to start. With no config file, every change is medium tier. A pull request needs one approval, filled Testing, Risk, and How to revert sections, and green CI.
+
+1. Create `.github/workflows/agent-pr-gate.yml`.
+
+```yaml
+name: agent-pr-gate
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  checks: read
+  actions: read
+  statuses: write
+
+jobs:
+  agent-pr-gate-job:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: 0xgui/agent-pr-gate@1cbe48bc4c397dd4f23ba6f47fdd6db6774f34de # v1.0.4
+        with:
+          ci-wait-seconds: '300'
+```
+
+`@v1` also works. A full commit SHA is safer, because whoever can move the `v1` tag controls your gate.
+
+2. Merge that file into the default branch. The gate does nothing until the workflow is on the default branch.
+3. Open a pull request. The gate posts one comment and sets the `agent-pr-gate` commit status.
+4. In branch protection, require the `agent-pr-gate` status. Do not require the `agent-pr-gate-job` check.
+
+The comment names what is missing, who should fix it, and a template for the description. A passing pull request changes the same comment to "all requirements met".
+
+The workflow above is the install. [`examples/workflow.yml`](examples/workflow.yml) is the same workflow with a concurrency group and a metrics artifact.
+
+### Fork PRs
+
+Same-repository pull requests do not need another workflow. Two files are optional when you accept forks.
+
+[`examples/review-relay.yml`](examples/review-relay.yml) records a review so the gate runs again from the default branch. A fork can delete that file. [`examples/recheck.yml`](examples/recheck.yml) is the backstop. It runs from the default branch every 30 minutes.
+
 ## Why
 
 Agents open PRs faster than people can review them. Many of those PRs arrive with no test results, no risk note, and no plan to revert. agent-pr-gate is not another AI reviewer. It decides who must look at a PR and what proof the PR needs. Then it tells the author, often an agent, exactly what is missing, in one comment that it keeps up to date. Reviewers start from a PR that already has its evidence.
@@ -71,11 +119,13 @@ The gate runs on PRs to any branch, but always from the workflow on the default 
 
 The default `github-token` is enough. Without a config file, every file gets the `medium` tier.
 
-For reviews on fork PRs and for a scheduled backstop, also add the workflows in [`examples/`](examples). The full example, [`examples/workflow.yml`](examples/workflow.yml), adds a concurrency group and the metrics artifact. [`examples/review-relay.yml`](examples/review-relay.yml) re-runs the gate after a review. [`examples/recheck.yml`](examples/recheck.yml) re-checks all open PRs every 30 minutes.
+Fork reviews and the scheduled backstop are optional. See [Fork PRs](#fork-prs).
 
 ## Start with a small config
 
-Put `.review-gate.yml` on the default branch. Every key is optional. This config marks docs as low risk and workflows as high risk:
+You can skip this file. The defaults are enough to start.
+
+Put `.review-gate.yml` on the default branch when you want different tiers. Every key is optional. This config marks docs as low risk and workflows as high risk:
 
 ```yaml
 tiers:
@@ -195,13 +245,17 @@ Use these settings when the defaults are too strict for your repository:
 - To stop requiring green CI, set `evidence.require_green_ci: false`.
 - To report without failing the job, set the `fail-on-block: 'false'` input. The commit status still says the PR is blocked, so don't make it a required check in this mode.
 - To need fewer approvals, lower `routing.approvals`, for example `{ low: 0, medium: 0, high: 1 }`.
-- On a repository with one maintainer, turn on the [owner override](#owner-override) for low-tier and medium-tier PRs.
+- On a repository with one maintainer, set `mode: solo`. High-tier pull requests then need no other approval when that person is the only listed owner. Evidence and green CI still apply. See [One-person repositories](#one-person-repositories).
 
 By default, the gate checks every PR, including PRs from people. A PR without the three sections is blocked until someone adds them. Add the sections to your PR template, relax the rules above, or limit the gate to agent PRs.
 
 ### One-person repositories
 
-The gate never waives the high tier, and the author's own approval never counts. So on a repository with one maintainer, a high-tier PR needs a review that nobody can give. When `maintainers` lists only the author, the `approvals` item says so and has `"cause": "no-other-reviewer"`. When `high_requires_codeowners` is `true` and there is no CODEOWNERS file, the `codeowners` item has `"cause": "no-codeowners-file"`. Choose one:
+Set `mode: solo` on the base branch when one person owns the repository. If that person is the only name in `maintainers`, `routing.owners`, and CODEOWNERS, a high-tier pull request needs no other approval and no CODEOWNERS approval. Evidence and green CI still apply. The comment says `Solo mode: applied`. If anyone else is listed, including a CODEOWNERS team, team rules stay in force.
+
+`mode` is read from the base commit. A pull request cannot turn solo mode on by editing the head copy, even with `config-ref: head`.
+
+Without `mode: solo`, the gate never waives the high tier, and the author's own approval never counts. When `maintainers` lists only the author, the `approvals` item says so and has `"cause": "no-other-reviewer"`. When `high_requires_codeowners` is `true` and there is no CODEOWNERS file, the `codeowners` item has `"cause": "no-codeowners-file"`. Choose one:
 
 - Add another reviewer: a collaborator with write access, listed in `maintainers` and CODEOWNERS.
 - Set `routing.approvals.high: 0` and `routing.high_requires_codeowners: false`. Evidence and green CI still apply to high-tier PRs.
@@ -245,18 +299,18 @@ The example workflow runs on `labeled` and `unlabeled`, so a label change re-run
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `github-token` | `github.token` | Token for API calls |
-| `config-path` | `.review-gate.yml` | Config location |
-| `config-ref` | `base` | Read the config from the base commit. `head` lets a PR change its own rules, so use it only on trusted repositories. CODEOWNERS always comes from the base commit |
 | `ci-wait-seconds` | `0` | How long to wait for other checks to finish before judging CI. Set it to about your CI's usual duration. See [Set it up](#set-it-up) |
-| `ignore-checks` | | Comma-separated extra check names to ignore |
-| `status-context` | `agent-pr-gate` | Commit status to write. Empty turns the status off |
-| `comment-author` | `github-actions[bot]` | Login whose marker comment the gate edits, when the token can't report its own identity. Set it when you use a GitHub App token |
-| `fail-on-block` | `true` | Fail the step when the PR is blocked |
-| `pr-number` | | Check this PR instead of the one in the event. `open` checks every open PR |
-| `max-prs` | `20` | With `pr-number: open`, the most due PRs to check per run, oldest-checked first. Anything but a plain positive integer (`1e3`, `0x10` and `01` included) falls back to 20 with a warning |
-| `recheck-max-age-hours` | `6` | With `pr-number: open`, re-check a PR at least this often, even if nothing changed |
-| `min-rate-limit` | `200` | With several PRs, stop the batch when fewer core API requests remain |
-| `metrics-path` | `$RUNNER_TEMP/agent-pr-gate-metrics.json` | Where to write the metrics JSON |
+| `config-path` | `.review-gate.yml` | Advanced. Config location |
+| `config-ref` | `base` | Advanced. Read the config from the base commit. `head` lets a PR change its own rules, so use it only on trusted repositories. CODEOWNERS and `mode` always come from the base commit |
+| `ignore-checks` | | Advanced. Comma-separated extra check names to ignore |
+| `status-context` | `agent-pr-gate` | Advanced. Commit status to write. Empty turns the status off |
+| `comment-author` | `github-actions[bot]` | Advanced. Login whose marker comment the gate edits, when the token can't report its own identity. Set it when you use a GitHub App token |
+| `fail-on-block` | `true` | Advanced. Fail the step when the PR is blocked |
+| `pr-number` | | Advanced. Check this PR instead of the one in the event. `open` checks every open PR |
+| `max-prs` | `20` | Advanced. With `pr-number: open`, the most due PRs to check per run, oldest-checked first. Anything but a plain positive integer (`1e3`, `0x10` and `01` included) falls back to 20 with a warning |
+| `recheck-max-age-hours` | `6` | Advanced. With `pr-number: open`, re-check a PR at least this often, even if nothing changed |
+| `min-rate-limit` | `200` | Advanced. With several PRs, stop the batch when fewer core API requests remain |
+| `metrics-path` | `$RUNNER_TEMP/agent-pr-gate-metrics.json` | Advanced. Where to write the metrics JSON |
 
 ### Outputs
 
@@ -278,6 +332,7 @@ The example workflow runs on `labeled` and `unlabeled`, so a label change re-run
 All keys, with their defaults:
 
 ```yaml
+mode: team                  # team or solo. solo is opt-in. See "One-person repositories".
 default_tier: medium        # tier for files that no glob matches
 
 tiers:                      # minimatch globs. A glob without a slash, like "*.md", matches at any depth.
