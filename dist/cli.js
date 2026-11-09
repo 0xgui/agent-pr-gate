@@ -34317,7 +34317,7 @@ function decide(input) {
       section: e.name,
       what: e.status === "missing" ? `Missing "## ${e.name}" section` : `"## ${e.name}" section is empty or only TODO`,
       where: "PR description",
-      fix: `Add a "## ${e.name}" heading with real content (template below). Edit the PR description; no new commit needed.`,
+      fix: e.status === "missing" ? `Add a "## ${e.name}" section with a result. A bare N/A does not count. Write a reason after N/A, for example \`N/A, no runtime change\`.` : `Replace the placeholder in "## ${e.name}". A bare N/A does not count. Write a reason after N/A, for example \`N/A, no runtime change\`. \`N/A: later\` does not count.`,
       who: "author"
     });
   }
