@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "verify": "vitest run test/solo.test.ts test/comment.test.ts",
     "all": "npm run lint && npm run typecheck && npm test && npm run build"
   },
   "license": "MIT",
